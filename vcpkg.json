@@ -1,0 +1,12 @@
+{
+  "name": "spanner",
+  "version": "0.1.0",
+  "dependencies": [
+    "boost-multiprecision",
+    "grpc",
+    "doctest",
+    "openssl",
+    "spdlog",
+    "tl-expected"
+  ]
+}
