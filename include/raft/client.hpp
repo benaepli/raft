@@ -8,105 +8,106 @@
 #include <tl/expected.hpp>
 
 namespace raft {
-    // The default timeout for requests in milliseconds.
+    /// The default timeout for requests in milliseconds.
     constexpr uint64_t DEFAULT_TIMEOUT_MS = 1000;
 
     namespace errors {
+        /// Represents a timeout error.
         struct Timeout {
         };
 
+        /// Represents an unimplemented functionality error.
         struct Unimplemented {
         };
 
+        /// Represents an invalid argument error.
         struct InvalidArgument {
-            std::string message;
+            std::string message; ///< The error message.
+        };
+
+        /// Represents a not leader error.
+        struct NotLeader {
         };
     } // namespace errors
 
     using Error = std::variant<
         errors::Timeout,
         errors::Unimplemented,
-        errors::InvalidArgument
+        errors::InvalidArgument,
+        errors::NotLeader
     >;
 
     namespace data {
-        // LogEntry represents a single log entry in the Raft log.
+        /// LogEntry represents a single log entry in the Raft log.
         struct LogEntry {
-            // The term of the log entry.
-            int64_t term;
-            // The data contained in the log entry.
-            std::string data;
+            int64_t term; ///< The term of the log entry.
+            std::string data; ///< The data contained in the log entry.
         };
 
-        // The request message for AppendEntries.
+        /// The request message for AppendEntries.
         struct AppendEntriesRequest {
-            // The current term.
-            int64_t term;
-            // The leader's ID.
-            std::string leaderID;
-            // The index of the log entry immediately preceding the new ones.
-            int64_t prevLogIndex;
-            // The term of the log entry at prev_log_index.
-            int64_t prevLogTerm;
-            // The log entries to store. This may be empty for a heartbeat.
-            std::vector<LogEntry> entries;
-            // The leader's commit index.
-            int64_t leaderCommit;
+            int64_t term; ///< The current term.
+            std::string leaderID; ///< The leader's ID.
+            int64_t prevLogIndex; ///< The index of the log entry immediately preceding the new ones.
+            int64_t prevLogTerm; ///< The term of the log entry at prev_log_index.
+            std::vector<LogEntry> entries; ///< The log entries to store. This may be empty for a heartbeat.
+            int64_t leaderCommit; ///< The leader's commit index.
         };
 
-        // The reply message for AppendEntries.
+        /// The reply message for AppendEntries.
         struct AppendEntriesResponse {
-            // The current term.
-            int64_t term;
-            // True if the follower contained the entry matching prevLogIndex and prevLogTerm.
-            bool success;
+            int64_t term; ///< The current term.
+            bool success; ///< True if the follower contained the entry matching prevLogIndex and prevLogTerm.
         };
 
-        // The request message for RequestVote.
+        /// The request message for RequestVote.
         struct RequestVoteRequest {
-            // The current term.
-            int64_t term;
-            // The candidate's ID.
-            std::string candidateID;
-            // The index of the candidate's last log entry.
-            int64_t lastLogIndex;
-            // The term of the candidate's last log entry.
-            int64_t lastLogTerm;
+            int64_t term; ///< The current term.
+            std::string candidateID; ///< The candidate's ID.
+            int64_t lastLogIndex; ///< The index of the candidate's last log entry.
+            int64_t lastLogTerm; ///< The term of the candidate's last log entry.
         };
 
-        // The reply message for RequestVote.
+        /// The reply message for RequestVote.
         struct RequestVoteResponse {
-            // The current term.
-            int64_t term;
-            // True if the candidate received a vote.
-            bool voteGranted;
+            int64_t term; ///< The current term.
+            bool voteGranted; ///< True if the candidate received a vote.
         };
     } // namespace data
 
-    // RequestConfig defines the configuration for a
+    /// RequestConfig defines the configuration for a request.
     struct RequestConfig {
-        // The timeout in milliseconds for the request.
-        uint64_t timeout = DEFAULT_TIMEOUT_MS;
+        uint64_t timeout = DEFAULT_TIMEOUT_MS; ///< The timeout in milliseconds for the request.
     };
 
 
-    // Client is an interface for a Raft client that can send AppendEntries and RequestVote requests.
+    /// Client is an interface for a Raft client that can send AppendEntries and RequestVote requests.
     class Client {
     public:
         virtual ~Client() = default;
 
+        /// Send an AppendEntries request to the server.
+        /// @param request The AppendEntries request to send.
+        /// @param config The configuration for the request.
+        /// @return The AppendEntries response or an error.
         virtual tl::expected<data::AppendEntriesResponse, Error> appendEntries(
             const data::AppendEntriesRequest &request,
             const RequestConfig &config
         ) = 0;
 
+        /// Send a RequestVote request to the server.
+        /// @param request The RequestVote request to send.
+        /// @param config The configuration for the request.
+        /// @return The RequestVote response or an error.
         virtual tl::expected<data::RequestVoteResponse, Error> requestVote(
             const data::RequestVoteRequest &request,
             const RequestConfig &config
         ) = 0;
     };
 
-    // createClient creates a new Raft client that connects to the specified address.
-    // The address should be in the format "host:port". This uses gRPC to connect to the server.
+    /// Creates a new Raft client that connects to the specified address.
+    /// This uses gRPC to connect to the server.
+    /// @param address The address to connect to in "host:port" format.
+    /// @return A unique pointer to the client or an error.
     tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string &address);
 } // namespace raft

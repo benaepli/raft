@@ -6,7 +6,7 @@ option cc_generic_services = false;
 option java_generic_services = false;
 option py_generic_services = false;
 
-// The Raft service runs on each replica.
+// The Raft service is used for communication between Raft replicas.
 service Raft {
   // AppendEntries is invoked by the leader to replica log entries and
   // as a heartbeat.

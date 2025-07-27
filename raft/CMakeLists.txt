@@ -9,6 +9,7 @@ add_library(raft
         src/client.cpp
         src/raft.cpp
         src/utils/grpc_data.hpp
+        ../include/raft/server.hpp
 )
 
 target_link_libraries(raft PUBLIC tl::expected)
