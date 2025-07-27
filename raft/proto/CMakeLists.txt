@@ -10,6 +10,7 @@ target_link_libraries(raft_protos
         protobuf::libprotobuf
 )
 target_include_directories(raft_protos PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(raft_protos PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 get_target_property(grpc_cpp_plugin_location gRPC::grpc_cpp_plugin LOCATION)
 protobuf_generate(TARGET raft_protos LANGUAGE cpp)

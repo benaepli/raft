@@ -51,7 +51,7 @@ CheckOptions:
     value: ""
   - key: "readability-identifier-naming.EnumConstantCase"
     value: "CamelCase"
-  - key: "readability-identifier-naming.PrivateMemberPrefix"
+  - key: "readability-identifier-naming.PrivateMemberSuffix"
     value: "_"
   - key: "readability-identifier-naming.StructCase"
     value: "CamelCase"
