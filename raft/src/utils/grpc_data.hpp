@@ -14,7 +14,7 @@ namespace raft::data {
     inline LogEntry fromProto(const raft_protos::LogEntry &proto) {
         return LogEntry{
             .term = proto.term(),
-            .data = proto.data()
+            .data = std::vector<std::byte>(proto.data().begin(), proto.data().end()),
         };
     }
 

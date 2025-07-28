@@ -12,21 +12,33 @@ namespace raft {
     constexpr uint64_t DEFAULT_TIMEOUT_MS = 1000;
 
     namespace errors {
-        /// Represents a timeout error.
+        /// A timeout has occurred.
         struct Timeout {
         };
 
-        /// Represents an unimplemented functionality error.
+        /// An unimplemented error.
         struct Unimplemented {
         };
 
-        /// Represents an invalid argument error.
+        /// An invalid argument error.
         struct InvalidArgument {
             std::string message; ///< The error message.
         };
 
-        /// Represents a not leader error.
+        /// The replica is not the leader.
         struct NotLeader {
+        };
+
+        /// The network interface is already running.
+        struct AlreadyRunning {
+        };
+
+        // The network interface is not running.
+        struct NotRunning {
+        };
+
+        // The server failed to start.
+        struct FailedToStart {
         };
     } // namespace errors
 
@@ -34,14 +46,17 @@ namespace raft {
         errors::Timeout,
         errors::Unimplemented,
         errors::InvalidArgument,
-        errors::NotLeader
+        errors::NotLeader,
+        errors::AlreadyRunning,
+        errors::NotRunning,
+        errors::FailedToStart
     >;
 
     namespace data {
         /// LogEntry represents a single log entry in the Raft log.
         struct LogEntry {
             int64_t term; ///< The term of the log entry.
-            std::string data; ///< The data contained in the log entry.
+            std::vector<std::byte> data; ///< The data contained in the log entry.
         };
 
         /// The request message for AppendEntries.

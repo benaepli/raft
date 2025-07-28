@@ -75,7 +75,7 @@ namespace raft {
         ) = 0;
     };
 
-    /// The Raft server interface. This is the main interface for the Raft server.
+    /// The Raft server interface. This is the main interface for the Raft server. ALl functions are thread-safe.
     class Server : public ServiceHandler {
     public:
         /// Returns the address of the last-known leader, or std::nullopt if either no leader exists or
@@ -134,9 +134,9 @@ namespace raft {
     /// @return A shared pointer to the server or an error.
     tl::expected<std::shared_ptr<Server>, Error> createServer(const ServerCreateConfig &config);
 
-    // Creates a new Raft network with the given configuration.
-    // Internally, this uses gRPC.
-    // @param config The configuration for the network.
-    // @return A shared pointer to the network or an error.
+    /// Creates a new Raft network with the given configuration.
+    /// Internally, this uses gRPC.
+    /// @param config The configuration for the network.
+    /// @return A shared pointer to the network or an error.
     tl::expected<std::shared_ptr<Network>, Error> createNetwork(const NetworkCreateConfig &config);
 } // namespace raft
