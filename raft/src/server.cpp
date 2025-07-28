@@ -5,6 +5,8 @@
 
 #include <grpcpp/grpcpp.h>
 #include "raft_protos/raft.grpc.pb.h"
+#include "fmt/core.h"
+#include "asio.hpp"
 
 namespace raft {
     namespace {
@@ -107,7 +109,10 @@ namespace raft {
 
         struct ClientInfo {
             std::unique_ptr<Client> client;
+            std::string id;
             std::string address;
+            uint64_t nextIndex = 0;
+            uint64_t matchIndex = 0;
         };
 
         struct Log {
@@ -132,16 +137,20 @@ namespace raft {
             ServerImpl(std::unique_ptr<ClientFactory> clientFactory,
                        std::shared_ptr<Persister> persister,
                        std::optional<CommitCallback> commitCallback,
-                       std::optional<LeaderChangedCallback> leaderChangedCallback) : clientFactory_(
-                    std::move(clientFactory)),
-                persister_(std::move(persister)),
-                commitCallback_(std::move(commitCallback)),
-                leaderChangedCallback_(std::move(leaderChangedCallback)) {
+                       std::optional<LeaderChangedCallback> leaderChangedCallback,
+                       TimeoutInterval heartbeatInterval) : clientFactory_(
+                                                                std::move(clientFactory)),
+                                                            persister_(std::move(persister)),
+                                                            commitCallback_(std::move(commitCallback)),
+                                                            leaderChangedCallback_(std::move(leaderChangedCallback)),
+                                                            heartbeatInterval_(heartbeatInterval.sample(gen_)) {
             }
 
             ~ServerImpl() override = default;
 
-            tl::expected<void, Error> init(std::vector<std::string> addresses);
+            tl::expected<void, Error> init(std::vector<Peer> peers);
+
+            void start() override;
 
             tl::expected<data::AppendEntriesResponse, Error> handleAppendEntries(
                 const data::AppendEntriesRequest &request
@@ -151,7 +160,7 @@ namespace raft {
                 const data::RequestVoteRequest &request
             ) override;
 
-            [[nodiscard]] std::optional<std::string> getLeaderAddress() const override;
+            [[nodiscard]] std::optional<std::string> getLeaderID() const override;
 
             tl::expected<EntryInfo, Error> append(std::vector<std::byte> data) override;
 
@@ -166,11 +175,17 @@ namespace raft {
             [[nodiscard]] uint64_t getLogByteCount() const override;
 
         private:
+            std::random_device rng_;
+            std::mt19937 gen_{rng_()};
+
             // The global lock for the server.
             std::mutex mutex_;
             std::unique_ptr<ClientFactory> clientFactory_;
             // Clients for the other replicas.
             std::vector<ClientInfo> clients_;
+            // A map from server ID to the index of the client in `clients_`.
+            std::unordered_map<std::string, size_t> clientIndices_;
+
             std::shared_ptr<Persister> persister_;
             std::optional<CommitCallback> commitCallback_;
             std::optional<LeaderChangedCallback> leaderChangedCallback_;
@@ -178,25 +193,46 @@ namespace raft {
             uint64_t term_ = 0;
             uint64_t commitIndex_ = 0;
             Log log_{};
+
+            uint64_t heartbeatInterval_;
+
+            asio::io_context io_{};
+            std::unique_ptr<asio::steady_timer> timer_;
         };
     } // namespace
 
-    tl::expected<void, Error> ServerImpl::init(std::vector<std::string> addresses) {
+    tl::expected<void, Error> ServerImpl::init(std::vector<Peer> peers) {
         clients_.clear();
-        clients_.reserve(addresses.size());
+        clients_.reserve(peers.size());
+        clientIndices_.clear();
+        clientIndices_.reserve(peers.size());
 
-        for (const auto &address: addresses) {
-            auto client = clientFactory_->createClient(address);
+        for (const auto &peer: peers) {
+            auto client = clientFactory_->createClient(peer.address);
             if (!client) {
                 return tl::make_unexpected(client.error());
             }
+            if (clientIndices_.contains(peer.id)) {
+                return tl::make_unexpected(errors::InvalidArgument{
+                    fmt::format("duplicate peer id: {}", peer.id)
+                });
+            }
 
+            clientIndices_[peer.id] = clients_.size();
             clients_.push_back(ClientInfo{
                 .client = std::move(*client),
-                .address = address
+                .id = peer.id,
+                .address = peer.address
             });
         }
         return {};
+    }
+
+    void ServerImpl::start() {
+        std::lock_guard lock{mutex_};
+
+
+        timer_ = std::make_unique<asio::steady_timer>(io_);
     }
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(const ServerCreateConfig &config) {

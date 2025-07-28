@@ -1,11 +1,29 @@
 #pragma once
 
 #include <optional>
+#include <random>
 
 #include "raft/client.hpp"
 
 namespace raft {
+    /// The default timeout interval in milliseconds.
+    constexpr std::pair<uint64_t, uint64_t> DEFAULT_TIMEOUT_INTERVAL_RANGE = {100, 200};
+    /// The default heartbeat interval in milliseconds.
+    constexpr uint64_t DEFAULT_HEARTBEAT_INTERVAL = 10;
+
     class ServiceHandler;
+
+    struct TimeoutInterval {
+        uint64_t min = DEFAULT_TIMEOUT_INTERVAL_RANGE.first;
+        uint64_t max = DEFAULT_TIMEOUT_INTERVAL_RANGE.second;
+
+        /// Returns a random timeout interval between min and max.
+        /// @param rng The random number generator to use.
+        [[nodiscard]] uint64_t sample(std::mt19937 &rng) const {
+            std::uniform_int_distribution dist(min, max);
+            return dist(rng);
+        }
+    };
 
     /// The interface for persisting the Raft server's state.
     struct Persister {
@@ -35,19 +53,28 @@ namespace raft {
 
     /**
      * The callback when the server's known leader changes.
-     * @param leaderAddress The address of the new leader, or std::nullopt if there is no leader.
+     * @param leaderID The ID of the new leader, or std::nullopt if there is no leader.
      * @param isLeader Whether this server is the new leader.
      * @param lostLeadership If this server was the previous leader, this will be true.
      */
     using LeaderChangedCallback = std::function<void(std::optional<std::string>, bool, bool)>;
 
+    /// A peer in the Raft cluster.
+    struct Peer {
+        std::string id;
+        std::string address;
+    };
+
     /// Configuration for creating a Raft server.
     struct ServerCreateConfig {
+        std::string id; ///< The ID of the server.
         std::unique_ptr<ClientFactory> clientFactory; ///< The client factory to use.
-        std::vector<std::string> addresses; ///< The list of other addresses of Raft servers in the cluster.
+        std::vector<Peer> peers; ///< The list of other addresses of Raft servers in the cluster.
         std::shared_ptr<Persister> persister; ///< The persister to use.
         std::optional<CommitCallback> commitCallback; ///< The commit callback to use.
         std::optional<LeaderChangedCallback> leaderChangedCallback; ///< The leader changed callback to use.
+        TimeoutInterval timeoutInterval;
+        uint64_t heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
     };
 
     struct NetworkCreateConfig {
@@ -78,10 +105,13 @@ namespace raft {
     /// The Raft server interface. This is the main interface for the Raft server. ALl functions are thread-safe.
     class Server : public ServiceHandler {
     public:
-        /// Returns the address of the last-known leader, or std::nullopt if either no leader exists or
-        /// the address is unknown.
+        /// Starts Raft consensus.
+        virtual void start() = 0;
+
+        /// Returns the ID of the last-known leader, or std::nullopt if either no leader exists or
+        /// the leader is unknown.
         /// @return The leader's address or std::nullopt.
-        [[nodiscard]] virtual std::optional<std::string> getLeaderAddress() const = 0;
+        [[nodiscard]] virtual std::optional<std::string> getLeaderID() const = 0;
 
         /// If the server is the leader, appends an entry to the log. Otherwise, returns a NotLeader error.
         /// Note that this will not wait for the entry to be committed.
@@ -111,6 +141,9 @@ namespace raft {
         /// Returns the total size of the log in bytes, which may be useful for snapshot strategy.
         /// @return The total byte count of the log.
         [[nodiscard]] virtual uint64_t getLogByteCount() const = 0;
+
+        // Returns the ID of the server.
+        [[nodiscard]] virtual std::string getId() const = 0;
     };
 
     /// The network interface for the Raft server.
