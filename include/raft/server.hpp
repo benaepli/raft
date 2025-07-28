@@ -7,7 +7,7 @@
 
 namespace raft {
     /// The default timeout interval in milliseconds.
-    constexpr std::pair<uint64_t, uint64_t> DEFAULT_TIMEOUT_INTERVAL_RANGE = {100, 200};
+    constexpr std::pair<uint64_t, uint64_t> DEFAULT_TIMEOUT_INTERVAL_RANGE = {500, 1000};
     /// The default heartbeat interval in milliseconds.
     constexpr uint64_t DEFAULT_HEARTBEAT_INTERVAL = 10;
 
