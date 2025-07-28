@@ -62,9 +62,18 @@ namespace raft {
 
             std::unique_ptr<raft_protos::Raft::Stub> stub_;
         };
+
+        class GrpcClientFactory final : public ClientFactory {
+        public:
+            ~GrpcClientFactory() override = default;
+
+            tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string &address) override {
+                return std::make_unique<GrpcClient>(grpc::CreateChannel(address, grpc::InsecureChannelCredentials()));
+            }
+        };
     } // namespace
 
     tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string &address) {
-        return std::make_unique<GrpcClient>(grpc::CreateChannel(address, grpc::InsecureChannelCredentials()));
+        return GrpcClientFactory().createClient(address);
     }
 } // namespace raft

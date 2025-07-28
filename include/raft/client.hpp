@@ -110,4 +110,13 @@ namespace raft {
     /// @param address The address to connect to in "host:port" format.
     /// @return A unique pointer to the client or an error.
     tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string &address);
+
+    class ClientFactory {
+    public:
+        virtual ~ClientFactory() = default;
+
+        virtual tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string &address) = 0;
+    };
+
+    std::unique_ptr<ClientFactory> createClientFactory();
 } // namespace raft

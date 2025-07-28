@@ -5,6 +5,8 @@
 #include "raft/client.hpp"
 
 namespace raft {
+    class ServiceHandler;
+
     /// The interface for persisting the Raft server's state.
     struct Persister {
         virtual ~Persister() = default;
@@ -41,27 +43,41 @@ namespace raft {
 
     /// Configuration for creating a Raft server.
     struct ServerCreateConfig {
-        std::optional<uint16_t> port; ///< The port number for this server.
+        std::unique_ptr<ClientFactory> clientFactory; ///< The client factory to use.
         std::vector<std::string> addresses; ///< The list of other addresses of Raft servers in the cluster.
         std::shared_ptr<Persister> persister; ///< The persister to use.
         std::optional<CommitCallback> commitCallback; ///< The commit callback to use.
         std::optional<LeaderChangedCallback> leaderChangedCallback; ///< The leader changed callback to use.
     };
 
+    struct NetworkCreateConfig {
+        std::shared_ptr<ServiceHandler> handler;
+        std::optional<uint16_t> port; ///< The port number for this server.
+    };
+
+    /// A service handler for the Raft server.
+    class ServiceHandler {
+    public:
+        virtual ~ServiceHandler() = default;
+
+        /// Handles an AppendEntries request.
+        /// @param request The AppendEntries request to handle.
+        /// @return The AppendEntries response or an error.
+        virtual tl::expected<data::AppendEntriesResponse, Error> handleAppendEntries(
+            const data::AppendEntriesRequest &request
+        ) = 0;
+
+        /// Handles a RequestVote request.
+        /// @param request The RequestVote request to handle.
+        /// @return The RequestVote response or an error.
+        virtual tl::expected<data::RequestVoteResponse, Error> handleRequestVote(
+            const data::RequestVoteRequest &request
+        ) = 0;
+    };
 
     /// The Raft server interface. This is the main interface for the Raft server.
-    class Server {
+    class Server : public ServiceHandler {
     public:
-        ~Server() = default;
-
-        /// Starts the Raft server.
-        /// @return Success or an error.
-        virtual tl::expected<void, Error> start() = 0;
-
-        /// Stops the Raft server.
-        /// @return Success or an error.
-        virtual tl::expected<void, Error> stop() = 0;
-
         /// Returns the address of the last-known leader, or std::nullopt if either no leader exists or
         /// the address is unknown.
         /// @return The leader's address or std::nullopt.
@@ -95,21 +111,20 @@ namespace raft {
         /// Returns the total size of the log in bytes, which may be useful for snapshot strategy.
         /// @return The total byte count of the log.
         [[nodiscard]] virtual uint64_t getLogByteCount() const = 0;
+    };
 
-    protected:
-        /// Handles an AppendEntries request.
-        /// @param request The AppendEntries request to handle.
-        /// @return The AppendEntries response or an error.
-        virtual tl::expected<data::AppendEntriesResponse, Error> handleAppendEntries(
-            const data::AppendEntriesRequest &request
-        ) = 0;
+    /// The network interface for the Raft server.
+    class Network {
+    public:
+        virtual ~Network() = default;
 
-        /// Handles a RequestVote request.
-        /// @param request The RequestVote request to handle.
-        /// @return The RequestVote response or an error.
-        virtual tl::expected<data::RequestVoteResponse, Error> handleRequestVote(
-            const data::RequestVoteRequest &request
-        ) = 0;
+        /// Starts the Raft server.
+        /// @return Success or an error.
+        virtual tl::expected<void, Error> start() = 0;
+
+        /// Stops the Raft server.
+        /// @return Success or an error.
+        virtual tl::expected<void, Error> stop() = 0;
     };
 
     /// Creates a new Raft server with the given configuration.
@@ -118,4 +133,10 @@ namespace raft {
     /// @param config The configuration for the server.
     /// @return A shared pointer to the server or an error.
     tl::expected<std::shared_ptr<Server>, Error> createServer(const ServerCreateConfig &config);
+
+    // Creates a new Raft network with the given configuration.
+    // Internally, this uses gRPC.
+    // @param config The configuration for the network.
+    // @return A shared pointer to the network or an error.
+    tl::expected<std::shared_ptr<Network>, Error> createNetwork(const NetworkCreateConfig &config);
 } // namespace raft
