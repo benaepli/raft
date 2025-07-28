@@ -1,3 +1,4 @@
+find_package(asio CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 
@@ -13,7 +14,7 @@ add_library(raft
 )
 
 target_link_libraries(raft PUBLIC tl::expected)
-target_link_libraries(raft PRIVATE raft_protos spdlog::spdlog)
+target_link_libraries(raft PRIVATE raft_protos spdlog::spdlog asio::asio)
 
 # Set up include directories
 target_include_directories(raft

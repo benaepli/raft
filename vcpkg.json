@@ -2,10 +2,9 @@
   "name": "spanner",
   "version": "0.1.0",
   "dependencies": [
-    "boost-multiprecision",
+    "asio",
     "grpc",
-    "doctest",
-    "openssl",
+    "gtest",
     "spdlog",
     "tl-expected"
   ]

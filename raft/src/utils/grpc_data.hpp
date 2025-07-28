@@ -7,14 +7,17 @@ namespace raft::data {
     inline raft_protos::LogEntry toProto(const LogEntry &entry) {
         raft_protos::LogEntry proto;
         proto.set_term(entry.term);
-        proto.set_data(entry.data);
+        proto.set_data(std::string(reinterpret_cast<const char *>(entry.data.data()), entry.data.size()));
+
         return proto;
     }
 
     inline LogEntry fromProto(const raft_protos::LogEntry &proto) {
+        std::vector<std::byte> data(proto.data().size());
+        std::memcpy(data.data(), proto.data().c_str(), proto.data().size());
+
         return LogEntry{
             .term = proto.term(),
-            .data = std::vector<std::byte>(proto.data().begin(), proto.data().end()),
         };
     }
 

@@ -1,4 +1,5 @@
 #include "raft/server.hpp"
+
 #include "utils/grpc_data.hpp"
 #include "utils/grpc_errors.hpp"
 
@@ -179,6 +180,24 @@ namespace raft {
             Log log_{};
         };
     } // namespace
+
+    tl::expected<void, Error> ServerImpl::init(std::vector<std::string> addresses) {
+        clients_.clear();
+        clients_.reserve(addresses.size());
+
+        for (const auto &address: addresses) {
+            auto client = clientFactory_->createClient(address);
+            if (!client) {
+                return tl::make_unexpected(client.error());
+            }
+
+            clients_.push_back(ClientInfo{
+                .client = std::move(*client),
+                .address = address
+            });
+        }
+        return {};
+    }
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(const ServerCreateConfig &config) {
         auto server = std::make_shared<ServerImpl>(config.clientFactory, config.persister,
