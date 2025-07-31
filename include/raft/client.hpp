@@ -6,51 +6,11 @@
 #include <variant>
 #include <vector>
 #include <tl/expected.hpp>
+#include "raft/errors.hpp"
 
 namespace raft {
     /// The default timeout for requests in milliseconds.
     constexpr uint64_t DEFAULT_TIMEOUT_MS = 1000;
-
-    namespace errors {
-        /// A timeout has occurred.
-        struct Timeout {
-        };
-
-        /// An unimplemented error.
-        struct Unimplemented {
-        };
-
-        /// An invalid argument error.
-        struct InvalidArgument {
-            std::string message; ///< The error message.
-        };
-
-        /// The replica is not the leader.
-        struct NotLeader {
-        };
-
-        /// The network interface is already running.
-        struct AlreadyRunning {
-        };
-
-        // The network interface is not running.
-        struct NotRunning {
-        };
-
-        // The server failed to start.
-        struct FailedToStart {
-        };
-    } // namespace errors
-
-    using Error = std::variant<
-        errors::Timeout,
-        errors::Unimplemented,
-        errors::InvalidArgument,
-        errors::NotLeader,
-        errors::AlreadyRunning,
-        errors::NotRunning,
-        errors::FailedToStart
-    >;
 
     namespace data {
         /// LogEntry represents a single log entry in the Raft log.

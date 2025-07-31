@@ -7,11 +7,15 @@ add_subdirectory(proto)
 
 add_library(raft
         ../include/raft/client.hpp
-        ../include/raft/raft.hpp
-        src/client.cpp
-        src/raft.cpp
-        src/utils/grpc_data.hpp
         ../include/raft/server.hpp
+        ../include/raft/errors.hpp
+        ../include/raft/persister.hpp
+        src/client.cpp
+        src/server.cpp
+        src/common/mpsc_queue.hpp
+        src/impl/persistence.hpp
+        src/utils/grpc_data.hpp
+        src/utils/grpc_errors.hpp
 )
 
 target_link_libraries(raft PUBLIC tl::expected)

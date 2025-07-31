@@ -4,6 +4,7 @@
 #include <random>
 
 #include "raft/client.hpp"
+#include "raft/persister.hpp"
 
 namespace raft {
     /// The default timeout interval in milliseconds.
@@ -23,21 +24,6 @@ namespace raft {
             std::uniform_int_distribution dist(min, max);
             return dist(rng);
         }
-    };
-
-    /// The interface for persisting the Raft server's state.
-    struct Persister {
-        virtual ~Persister() = default;
-
-        /// Saves the server's persistent state to storage.
-        /// This method is called whenever the server's state changes and needs to be persisted.
-        /// @param state The serialized state data to persist.
-        virtual void saveState(std::vector<std::byte> state) = 0;
-
-        /// Loads the server's persistent state from storage.
-        /// This method is called during server initialization to restore previous state.
-        /// @return The serialized state data if available, or std::nullopt if no state exists.
-        virtual std::optional<std::vector<std::byte> > loadState() = 0;
     };
 
     /// Information about a log entry.
@@ -162,10 +148,10 @@ namespace raft {
 
     /// Creates a new Raft server with the given configuration.
     /// Note that on creation, the server will attempt to read its state from the persister.
-    /// For any
+    /// The client factory will be moved into the server.
     /// @param config The configuration for the server.
     /// @return A shared pointer to the server or an error.
-    tl::expected<std::shared_ptr<Server>, Error> createServer(const ServerCreateConfig &config);
+    tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig &config);
 
     /// Creates a new Raft network with the given configuration.
     /// Internally, this uses gRPC.
