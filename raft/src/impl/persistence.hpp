@@ -37,7 +37,7 @@ namespace raft::impl {
 
         void addRequest(PersistenceRequest request) {
             std::lock_guard lock{mutex_};
-            requests_.push(std::move(request.callback));
+            callbacks_.push(std::move(request.callback));
             data_ = std::move(request.data);
             condition_.notify_one();
         }
@@ -53,14 +53,14 @@ namespace raft::impl {
                 std::unique_lock lock{mutex_};
 
                 // First, wait indefinitely if the queue is empty.
-                condition_.wait(lock, [this] { return !requests_.empty() || !running_; });
+                condition_.wait(lock, [this] { return !callbacks_.empty() || !running_; });
                 if (!running_) {
                     return;
                 }
 
                 // Then, wait until either the timer expires or the queue contains more than MAX_LOG_ENTRIES.
                 condition_.wait_until(lock, nextPersistTime(), [this] {
-                    return requests_.size() >= maxEntries_ || !running_;
+                    return callbacks_.size() >= maxEntries_ || !running_;
                 });
                 if (!running_) {
                     return;
@@ -74,7 +74,7 @@ namespace raft::impl {
         // Persist all requests in the queue. This requires the caller to obtain a lock on the mutex.
         void persist(std::unique_lock<std::mutex> &lock) {
             std::queue<std::function<void()> > requests;
-            requests.swap(requests_);
+            requests.swap(callbacks_);
 
             std::vector<std::byte> data;
             data.swap(data_);
@@ -100,7 +100,7 @@ namespace raft::impl {
         uint64_t maxEntries_;
 
         std::mutex mutex_;
-        std::queue<std::function<void()> > requests_;
+        std::queue<std::function<void()> > callbacks_;
         std::vector<std::byte> data_;
         std::condition_variable condition_;
 
