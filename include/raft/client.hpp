@@ -80,14 +80,14 @@ namespace raft
         /// @param request The AppendEntries request to send.
         /// @param config The configuration for the request.
         /// @return The AppendEntries response or an error.
-        virtual tl::expected<data::AppendEntriesResponse, Error> appendEntries(
+        virtual asio::awaitable<tl::expected<data::AppendEntriesResponse, Error>> appendEntries(
             const data::AppendEntriesRequest& request, const RequestConfig& config) = 0;
 
         /// Send a RequestVote request to the server.
         /// @param request The RequestVote request to send.
         /// @param config The configuration for the request.
         /// @return The RequestVote response or an error.
-        virtual tl::expected<data::RequestVoteResponse, Error> requestVote(
+        virtual asio::awaitable<tl::expected<data::RequestVoteResponse, Error>> requestVote(
             const data::RequestVoteRequest& request, const RequestConfig& config) = 0;
     };
 

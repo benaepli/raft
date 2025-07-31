@@ -21,36 +21,20 @@ namespace raft {
                 : stub_(raft_protos::Raft::NewStub(channel)) {
             }
 
-            tl::expected<AppendEntriesResponse, Error> appendEntries(
+            asio::awaitable<tl::expected<AppendEntriesResponse, Error>> appendEntries(
                 const AppendEntriesRequest &request,
                 const RequestConfig &config
             ) override {
-                grpc::ClientContext context;
-                configureContext(context, config);
-                raft_protos::AppendEntriesReply response;
-                grpc::Status status = stub_->AppendEntries(&context, data::toProto(request), &response);
-
-                if (!status.ok()) {
-                    return tl::unexpected(errors::fromGrpcStatus(status));
-                }
-
-                return data::fromProto(response);
+                // TODO: Implement async version
+                co_return tl::unexpected(Error{});
             }
 
-            tl::expected<RequestVoteResponse, Error> requestVote(
+            asio::awaitable<tl::expected<RequestVoteResponse, Error>> requestVote(
                 const RequestVoteRequest &request,
                 const RequestConfig &config
             ) override {
-                grpc::ClientContext context;
-                configureContext(context, config);
-                raft_protos::RequestVoteReply response;
-                grpc::Status status = stub_->RequestVote(&context, data::toProto(request), &response);
-
-                if (!status.ok()) {
-                    return tl::unexpected(errors::fromGrpcStatus(status));
-                }
-
-                return data::fromProto(response);
+                // TODO: Implement async version
+                co_return tl::unexpected(Error{});
             }
 
         private:
