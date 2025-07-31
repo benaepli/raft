@@ -18,4 +18,4 @@ namespace raft {
         /// @return The serialized state data if available, or std::nullopt if no state exists.
         virtual std::optional<std::vector<std::byte> > loadState() = 0;
     };
-}
+} // namespace raft

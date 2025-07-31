@@ -107,4 +107,4 @@ namespace raft::impl {
         std::thread thread_;
         std::atomic<bool> running_ = true;
     };
-}
+} // namespace raft::impl

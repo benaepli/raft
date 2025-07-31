@@ -110,10 +110,9 @@ namespace raft {
             std::unique_ptr<grpc::Server> server_;
         };
 
-        struct ClientInfo {
-            std::unique_ptr<Client> client;
-            std::string id;
-            std::string address;
+        // LeaderClientInfo contains the state needed to manage the replication of log entries to a
+        // single follower.
+        struct LeaderClientInfo {
             // The index of the next log entry to send to the replica.
             uint64_t nextIndex = 0;
             // The index of the highest log entry known to be replicated.
@@ -122,6 +121,12 @@ namespace raft {
             // The maximum number of log entries to send in a single AppendEntries request.
             // TODO: this will be adjusted dynamically based on the replica's responses.
             uint64_t batchSize = 1;
+        };
+
+        struct ClientInfo {
+            std::unique_ptr<Client> client;
+            std::string id;
+            std::string address;
         };
 
         struct Log {
@@ -218,6 +223,20 @@ namespace raft {
             events::Append
         >;
 
+        struct CandidateInfo {
+            uint64_t voteCount; // The number of votes received.
+        };
+
+        struct LeaderInfo {
+            std::unordered_map<std::string, LeaderClientInfo> clients;
+        };
+
+        struct FollowerInfo {
+            std::optional<std::string> votedFor;
+        };
+
+        using State = std::variant<CandidateInfo, LeaderInfo, FollowerInfo>;
+
         // The maximum scheduled interval in microseconds between persistence events.
         constexpr std::chrono::microseconds MAX_PERSISTENCE_INTERVAL(1000);
         // The maximum number of log entries before persistence is triggered.
@@ -241,14 +260,11 @@ namespace raft {
                                                      heartbeatInterval_(heartbeatInterval) {
             }
 
-            ~ServerImpl() override = default;
+            ~ServerImpl() override;
 
             tl::expected<void, Error> init(const std::vector<Peer> &peers);
 
             void start() override;
-
-            void eventLoop() {
-            }
 
             tl::expected<data::AppendEntriesResponse, Error> handleAppendEntries(
                 const data::AppendEntriesRequest &request
@@ -275,6 +291,38 @@ namespace raft {
             [[nodiscard]] std::string getId() const override;
 
         private:
+            void scheduleTimeout();
+
+            void onTimeout(asio::error_code ec);
+
+            void eventLoop();
+
+            void process(Event &event);
+
+            void process(const events::Timeout &event);
+
+            void process(const events::HeartbeatTimeout &event);
+
+            void process(const events::AppendEntriesResponse &event);
+
+            void process(const events::RequestVoteResponse &event);
+
+            void process(events::AppendEntries &event);
+
+            void process(events::RequestVote &event);
+
+            void process(events::GetTerm &event);
+
+            void process(events::GetCommitIndex &event);
+
+            void process(events::GetLogByteCount &event);
+
+            void process(events::GetLeaderID &event);
+
+            void process(const events::PersistenceComplete &event);
+
+            void process(events::Append &event);
+
             // The global lock for the server.
             std::mutex mutex_;
 
@@ -298,6 +346,7 @@ namespace raft {
             Log log_{};
             uint64_t timeoutInterval_;
             uint64_t heartbeatInterval_;
+            State state_ = CandidateInfo{};
 
             std::optional<std::string> lastLeaderID_;
 
@@ -310,6 +359,13 @@ namespace raft {
             std::unique_ptr<asio::steady_timer> timer_;
         };
     } // namespace
+
+    ServerImpl::~ServerImpl() {
+        events_.close();
+        if (eventThread_) {
+            eventThread_->join();
+        }
+    }
 
     tl::expected<void, Error> ServerImpl::init(const std::vector<Peer> &peers) {
         clients_.clear();
@@ -341,12 +397,89 @@ namespace raft {
         return {};
     }
 
+    void ServerImpl::scheduleTimeout() {
+        timer_->expires_from_now(asio::chrono::milliseconds(timeoutInterval_));
+        timer_->async_wait([this](asio::error_code ec) { onTimeout(ec); });
+    }
+
     void ServerImpl::start() {
         std::lock_guard lock{mutex_};
 
         persistenceHandler_ = std::make_unique<impl::PersistenceHandler>(
             persister_, MAX_PERSISTENCE_INTERVAL, MAX_LOG_ENTRIES);
-        timer_ = std::make_unique<asio::steady_timer>(io_, asio::chrono::milliseconds(timeoutInterval_));
+        scheduleTimeout();
+    }
+
+    void ServerImpl::eventLoop() {
+        while (true) {
+            auto event = events_.pop();
+            if (!event) {
+                break;
+            }
+            process(*event);
+        }
+    }
+
+    void ServerImpl::process(Event &event) {
+        std::visit([this](auto &e) { process(e); }, event);
+    }
+
+    void ServerImpl::process(const events::Timeout &event) {
+        term_++;
+    }
+
+    void ServerImpl::process(const events::HeartbeatTimeout &event) {
+        // TODO: Implement heartbeat timeout handling
+    }
+
+    void ServerImpl::process(const events::AppendEntriesResponse &event) {
+        // TODO: Implement AppendEntries response handling
+    }
+
+    void ServerImpl::process(const events::RequestVoteResponse &event) {
+        // TODO: Implement RequestVote response handling
+    }
+
+    void ServerImpl::process(events::AppendEntries &event) {
+        // TODO: Implement AppendEntries request handling
+    }
+
+    void ServerImpl::process(events::RequestVote &event) {
+        // TODO: Implement RequestVote request handling
+    }
+
+    void ServerImpl::process(events::GetTerm &event) {
+        event.promise.set_value(term_);
+    }
+
+    void ServerImpl::process(events::GetCommitIndex &event) {
+        event.promise.set_value(commitIndex_);
+    }
+
+    void ServerImpl::process(events::GetLogByteCount &event) {
+        // TODO: Calculate actual log byte count
+        event.promise.set_value(0);
+    }
+
+    void ServerImpl::process(events::GetLeaderID &event) {
+        event.promise.set_value(lastLeaderID_);
+    }
+
+    void ServerImpl::process(const events::PersistenceComplete &event) {
+        event.callback();
+    }
+
+    void ServerImpl::process(events::Append &event) {
+        // TODO: Implement log append handling
+    }
+
+    void ServerImpl::onTimeout(asio::error_code ec) {
+        if (ec) {
+            return;
+        }
+        events::Timeout event{};
+        events_.push(event);
+        scheduleTimeout();
     }
 
     // Forwards an AppendEntries request to the event loop.

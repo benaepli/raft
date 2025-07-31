@@ -18,8 +18,8 @@ add_library(raft
         src/utils/grpc_errors.hpp
 )
 
-target_link_libraries(raft PUBLIC tl::expected)
-target_link_libraries(raft PRIVATE raft_protos spdlog::spdlog asio::asio fmt::fmt)
+target_link_libraries(raft PUBLIC tl::expected asio::asio)
+target_link_libraries(raft PRIVATE raft_protos spdlog::spdlog fmt::fmt)
 
 # Set up include directories
 target_include_directories(raft

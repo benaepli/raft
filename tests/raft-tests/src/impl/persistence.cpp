@@ -19,6 +19,13 @@ namespace {
     }
 } // namespace
 
+TEST(PersistenceHandler, EmptyTimeout) {
+    auto persister = std::make_shared<MockPersister>();
+    raft::impl::PersistenceHandler handler{persister, std::chrono::milliseconds(1), 2};
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+}
+
 TEST(PersistenceHandler, SingleTimeout) {
     std::array state{0, 1, 2};
 
@@ -184,7 +191,7 @@ TEST(PersistenceHandler, MultipleTimeoutWithMaxEntries) {
         .data = data2, .callback = [] {
         }
     });
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     handler.addRequest(raft::impl::PersistenceRequest{
         .data = data3, .callback = [] {
         }
