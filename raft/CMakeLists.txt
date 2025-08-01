@@ -7,10 +7,12 @@ add_subdirectory(proto)
 
 add_library(raft
         ../include/raft/client.hpp
+        ../include/raft/network.hpp
         ../include/raft/server.hpp
         ../include/raft/errors.hpp
         ../include/raft/persister.hpp
         src/client.cpp
+        src/network.cpp
         src/server.cpp
         src/common/mpsc_queue.hpp
         src/impl/persistence.hpp

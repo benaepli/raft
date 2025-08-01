@@ -23,6 +23,8 @@ namespace raft
         {
             int64_t term;  ///< The term of the log entry.
             std::vector<std::byte> data;  ///< The data contained in the log entry.
+
+            bool operator==(const LogEntry& other) const = default;
         };
 
         /// The request message for AppendEntries.
@@ -36,6 +38,8 @@ namespace raft
             std::vector<LogEntry>
                 entries;  ///< The log entries to store. This may be empty for a heartbeat.
             int64_t leaderCommit;  ///< The leader's commit index.
+
+            bool operator==(const AppendEntriesRequest& other) const = default;
         };
 
         /// The reply message for AppendEntries.
@@ -44,6 +48,8 @@ namespace raft
             int64_t term;  ///< The current term.
             bool success;  ///< True if the follower contained the entry matching prevLogIndex and
                            ///< prevLogTerm.
+
+            bool operator==(const AppendEntriesResponse& other) const = default;
         };
 
         /// The request message for RequestVote.
@@ -53,6 +59,8 @@ namespace raft
             std::string candidateID;  ///< The candidate's ID.
             int64_t lastLogIndex;  ///< The index of the candidate's last log entry.
             int64_t lastLogTerm;  ///< The term of the candidate's last log entry.
+
+            bool operator==(const RequestVoteRequest& other) const = default;
         };
 
         /// The reply message for RequestVote.
@@ -60,6 +68,8 @@ namespace raft
         {
             int64_t term;  ///< The current term.
             bool voteGranted;  ///< True if the candidate received a vote.
+
+            bool operator==(const RequestVoteResponse& other) const = default;
         };
     }  // namespace data
 

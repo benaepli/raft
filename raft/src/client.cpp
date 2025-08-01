@@ -48,7 +48,7 @@ namespace raft
                     std::function<void(tl::expected<AppendEntriesResponse, Error>)> callback;
                 };
 
-                auto params = std::make_unique<Parameters>();
+                auto params = std::make_shared<Parameters>();
                 params->context = std::move(context);
                 params->request =
                     std::make_unique<raft_protos::AppendEntriesRequest>(std::move(protoRequest));
@@ -59,15 +59,15 @@ namespace raft
                     params->context.get(),
                     params->request.get(),
                     params->reply.get(),
-                    [request = std::move(params)](grpc::Status status) mutable
+                    [params](grpc::Status status) mutable
                     {
                         if (status.ok())
                         {
-                            request->callback(data::fromProto(*request->reply));
+                            params->callback(data::fromProto(*params->reply));
                         }
                         else
                         {
-                            request->callback(tl::unexpected(errors::fromGrpcStatus(status)));
+                            params->callback(tl::unexpected(errors::fromGrpcStatus(status)));
                         }
                     });
             }
@@ -89,7 +89,7 @@ namespace raft
                     std::function<void(tl::expected<RequestVoteResponse, Error>)> callback;
                 };
 
-                auto params = std::make_unique<Parameters>();
+                auto params = std::make_shared<Parameters>();
                 params->context = std::move(context);
                 params->request =
                     std::make_unique<raft_protos::RequestVoteRequest>(std::move(protoRequest));
@@ -100,15 +100,15 @@ namespace raft
                     params->context.get(),
                     params->request.get(),
                     params->reply.get(),
-                    [request = std::move(params)](grpc::Status status) mutable
+                    [params](grpc::Status status) mutable
                     {
                         if (status.ok())
                         {
-                            request->callback(data::fromProto(*request->reply));
+                            params->callback(data::fromProto(*params->reply));
                         }
                         else
                         {
-                            request->callback(tl::unexpected(errors::fromGrpcStatus(status)));
+                            params->callback(tl::unexpected(errors::fromGrpcStatus(status)));
                         }
                     });
             }

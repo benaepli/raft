@@ -21,6 +21,8 @@ namespace raft
         struct InvalidArgument
         {
             std::string message;  ///< The error message.
+
+            bool operator==(const InvalidArgument& other) const = default;
         };
 
         /// The replica is not the leader.
