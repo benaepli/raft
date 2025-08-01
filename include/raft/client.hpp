@@ -1,12 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <variant>
 #include <vector>
 
-#include <asio/awaitable.hpp>
 #include <tl/expected.hpp>
 
 #include "raft/errors.hpp"
@@ -78,17 +78,21 @@ namespace raft
 
         /// Send an AppendEntries request to the server.
         /// @param request The AppendEntries request to send.
+        /// @param callback The callback to invoke with the response or error.
         /// @param config The configuration for the request.
-        /// @return The AppendEntries response or an error.
-        virtual asio::awaitable<tl::expected<data::AppendEntriesResponse, Error>> appendEntries(
-            const data::AppendEntriesRequest& request, const RequestConfig& config) = 0;
+        virtual void appendEntries(
+            data::AppendEntriesRequest request,
+            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback,
+            RequestConfig config) = 0;
 
         /// Send a RequestVote request to the server.
         /// @param request The RequestVote request to send.
+        /// @param callback The callback to invoke with the response or error.
         /// @param config The configuration for the request.
-        /// @return The RequestVote response or an error.
-        virtual asio::awaitable<tl::expected<data::RequestVoteResponse, Error>> requestVote(
-            const data::RequestVoteRequest& request, const RequestConfig& config) = 0;
+        virtual void requestVote(
+            data::RequestVoteRequest request,
+            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback,
+            RequestConfig config) = 0;
     };
 
     /// Creates a new Raft client that connects to the specified address.

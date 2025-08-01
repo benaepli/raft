@@ -1,6 +1,9 @@
 
 
 #include <chrono>
+#include <future>
+#include <memory>
+#include <thread>
 
 #include "raft/client.hpp"
 
@@ -27,18 +30,87 @@ namespace raft
             {
             }
 
-            asio::awaitable<tl::expected<AppendEntriesResponse, Error>> appendEntries(
-                const AppendEntriesRequest& request, const RequestConfig& config) override
+            void appendEntries(
+                AppendEntriesRequest request,
+                std::function<void(tl::expected<AppendEntriesResponse, Error>)> callback,
+                RequestConfig config) override
             {
-                // TODO: Implement async version
-                co_return tl::unexpected(Error {});
+                auto context = std::make_unique<grpc::ClientContext>();
+                configureContext(*context, config);
+
+                auto protoRequest = data::toProto(request);
+
+                struct Parameters
+                {
+                    std::unique_ptr<grpc::ClientContext> context;
+                    std::unique_ptr<raft_protos::AppendEntriesRequest> request;
+                    std::unique_ptr<raft_protos::AppendEntriesReply> reply;
+                    std::function<void(tl::expected<AppendEntriesResponse, Error>)> callback;
+                };
+
+                auto params = std::make_unique<Parameters>();
+                params->context = std::move(context);
+                params->request =
+                    std::make_unique<raft_protos::AppendEntriesRequest>(std::move(protoRequest));
+                params->reply = std::make_unique<raft_protos::AppendEntriesReply>();
+                params->callback = std::move(callback);
+
+                stub_->async()->AppendEntries(
+                    params->context.get(),
+                    params->request.get(),
+                    params->reply.get(),
+                    [request = std::move(params)](grpc::Status status) mutable
+                    {
+                        if (status.ok())
+                        {
+                            request->callback(data::fromProto(*request->reply));
+                        }
+                        else
+                        {
+                            request->callback(tl::unexpected(errors::fromGrpcStatus(status)));
+                        }
+                    });
             }
 
-            asio::awaitable<tl::expected<RequestVoteResponse, Error>> requestVote(
-                const RequestVoteRequest& request, const RequestConfig& config) override
+            void requestVote(RequestVoteRequest request,
+                             std::function<void(tl::expected<RequestVoteResponse, Error>)> callback,
+                             RequestConfig config) override
             {
-                // TODO: Implement async version
-                co_return tl::unexpected(Error {});
+                auto context = std::make_unique<grpc::ClientContext>();
+                configureContext(*context, config);
+
+                auto protoRequest = data::toProto(request);
+
+                struct Parameters
+                {
+                    std::unique_ptr<grpc::ClientContext> context;
+                    std::unique_ptr<raft_protos::RequestVoteRequest> request;
+                    std::unique_ptr<raft_protos::RequestVoteReply> reply;
+                    std::function<void(tl::expected<RequestVoteResponse, Error>)> callback;
+                };
+
+                auto params = std::make_unique<Parameters>();
+                params->context = std::move(context);
+                params->request =
+                    std::make_unique<raft_protos::RequestVoteRequest>(std::move(protoRequest));
+                params->reply = std::make_unique<raft_protos::RequestVoteReply>();
+                params->callback = std::move(callback);
+
+                stub_->async()->RequestVote(
+                    params->context.get(),
+                    params->request.get(),
+                    params->reply.get(),
+                    [request = std::move(params)](grpc::Status status) mutable
+                    {
+                        if (status.ok())
+                        {
+                            request->callback(data::fromProto(*request->reply));
+                        }
+                        else
+                        {
+                            request->callback(tl::unexpected(errors::fromGrpcStatus(status)));
+                        }
+                    });
             }
 
           private:
