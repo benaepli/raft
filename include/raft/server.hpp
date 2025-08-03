@@ -90,20 +90,19 @@ namespace raft
             std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback) = 0;
     };
 
-    /// The Raft server interface. This is the main interface for the Raft server. ALl functions are
+    /// The Raft server interface. This is the main interface for the Raft server. All functions are
     /// thread-safe.
     class Server : public ServiceHandler
     {
       public:
         /// Starts Raft consensus.
         virtual tl::expected<void, Error> start() = 0;
-        // Shuts down the Raft server.
+        /// Shuts down the Raft server.
         virtual void shutdown() = 0;
 
-        /// Returns the ID of the last-known leader, or std::nullopt if either no leader exists or
-        /// the leader is unknown.
-        /// @return The leader's address or std::nullopt.
-        [[nodiscard]] virtual std::optional<std::string> getLeaderID() const = 0;
+        /// Returns the ID of the last-known leader.
+        /// @return The leader's ID or UnknownLeader if no leader is known.
+        [[nodiscard]] virtual tl::expected<std::string, Error> getLeaderID() const = 0;
 
         /// If the server is the leader, appends an entry to the log. Otherwise, returns a NotLeader
         /// error. Note that this will not wait for the entry to be committed. An appended entry is
@@ -122,19 +121,20 @@ namespace raft
         /// @param callback The callback function to set.
         virtual void setLeaderChangedCallback(LeaderChangedCallback callback) = 0;
 
-        /// Returns the current term. If the server has shut down, returns an error.
-        /// @return The current term.
+        /// Returns the current term.
+        /// @return The current term if the server has not been shut down.
         [[nodiscard]] virtual tl::expected<uint64_t, Error> getTerm() const = 0;
 
         /// Returns the current commit index.
-        /// @return The current commit index.
+        /// @return The current commit index if the server has not been shut down.
         [[nodiscard]] virtual tl::expected<uint64_t, Error> getCommitIndex() const = 0;
 
         /// Returns the total size of the log in bytes, which may be useful for snapshot strategy.
-        /// @return The total byte count of the log.
+        /// @return The total byte count of the log if the server has not been shut down.
         [[nodiscard]] virtual tl::expected<uint64_t, Error> getLogByteCount() const = 0;
 
-        // Returns the ID of the server.
+        /// Returns the ID of the server.
+        /// @return The server's ID.
         [[nodiscard]] virtual std::string getId() const = 0;
     };
 

@@ -8,6 +8,7 @@ add_subdirectory(proto)
 add_library(raft
     ../include/raft/client.hpp
     ../include/raft/errors.hpp
+    ../include/raft/fmt/errors.hpp
     ../include/raft/network.hpp
     ../include/raft/persister.hpp
     ../include/raft/server.hpp

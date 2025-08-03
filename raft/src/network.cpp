@@ -26,7 +26,7 @@ namespace raft
             grpc::ServerUnaryReactor* AppendEntries(
                 grpc::CallbackServerContext* context,
                 const raft_protos::AppendEntriesRequest* request,
-                raft_protos::AppendEntriesReply* response) override
+                raft_protos::AppendEntriesResponse* response) override
             {
                 auto* reactor = context->DefaultReactor();
                 auto internalRequest = data::fromProto(*request);
@@ -49,7 +49,7 @@ namespace raft
             grpc::ServerUnaryReactor* RequestVote(
                 grpc::CallbackServerContext* context,
                 const raft_protos::RequestVoteRequest* request,
-                raft_protos::RequestVoteReply* response) override
+                raft_protos::RequestVoteResponse* response) override
             {
                 auto* reactor = context->DefaultReactor();
                 auto internalRequest = data::fromProto(*request);

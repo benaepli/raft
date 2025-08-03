@@ -21,7 +21,7 @@ namespace raft
         /// LogEntry represents a single log entry in the Raft log.
         struct LogEntry
         {
-            int64_t term;  ///< The term of the log entry.
+            uint64_t term;  ///< The term of the log entry.
             std::vector<std::byte> data;  ///< The data contained in the log entry.
 
             bool operator==(const LogEntry& other) const = default;
@@ -30,14 +30,14 @@ namespace raft
         /// The request message for AppendEntries.
         struct AppendEntriesRequest
         {
-            int64_t term;  ///< The current term.
+            uint64_t term;  ///< The current term.
             std::string leaderID;  ///< The leader's ID.
-            int64_t
+            uint64_t
                 prevLogIndex;  ///< The index of the log entry immediately preceding the new ones.
-            int64_t prevLogTerm;  ///< The term of the log entry at prev_log_index.
+            uint64_t prevLogTerm;  ///< The term of the log entry at prev_log_index.
             std::vector<LogEntry>
                 entries;  ///< The log entries to store. This may be empty for a heartbeat.
-            int64_t leaderCommit;  ///< The leader's commit index.
+            uint64_t leaderCommit;  ///< The leader's commit index.
 
             bool operator==(const AppendEntriesRequest& other) const = default;
         };
@@ -45,7 +45,7 @@ namespace raft
         /// The reply message for AppendEntries.
         struct AppendEntriesResponse
         {
-            int64_t term;  ///< The current term.
+            uint64_t term;  ///< The current term.
             bool success;  ///< True if the follower contained the entry matching prevLogIndex and
                            ///< prevLogTerm.
 
@@ -55,10 +55,10 @@ namespace raft
         /// The request message for RequestVote.
         struct RequestVoteRequest
         {
-            int64_t term;  ///< The current term.
+            uint64_t term;  ///< The current term.
             std::string candidateID;  ///< The candidate's ID.
-            int64_t lastLogIndex;  ///< The index of the candidate's last log entry.
-            int64_t lastLogTerm;  ///< The term of the candidate's last log entry.
+            uint64_t lastLogIndex;  ///< The index of the candidate's last log entry.
+            uint64_t lastLogTerm;  ///< The term of the candidate's last log entry.
 
             bool operator==(const RequestVoteRequest& other) const = default;
         };
@@ -66,7 +66,7 @@ namespace raft
         /// The reply message for RequestVote.
         struct RequestVoteResponse
         {
-            int64_t term;  ///< The current term.
+            uint64_t term;  ///< The current term.
             bool voteGranted;  ///< True if the candidate received a vote.
 
             bool operator==(const RequestVoteResponse& other) const = default;

@@ -21,7 +21,7 @@ namespace raft::data
     inline raft_protos::LogEntry toProto(const LogEntry& entry)
     {
         raft_protos::LogEntry proto;
-        proto.set_term(entry.term);
+        proto.set_term(static_cast<int64_t>(entry.term));
         proto.set_data(toString(entry.data));
 
         return proto;
@@ -30,7 +30,7 @@ namespace raft::data
     inline LogEntry fromProto(const raft_protos::LogEntry& proto)
     {
         return LogEntry {
-            .term = proto.term(),
+            .term = static_cast<uint64_t>(proto.term()),
             .data = toBytes(proto.data()),
         };
     }
@@ -38,26 +38,26 @@ namespace raft::data
     inline raft_protos::AppendEntriesRequest toProto(const AppendEntriesRequest& request)
     {
         raft_protos::AppendEntriesRequest proto;
-        proto.set_term(request.term);
+        proto.set_term(static_cast<int64_t>(request.term));
         proto.set_leader_id(request.leaderID);
-        proto.set_prev_log_index(request.prevLogIndex);
-        proto.set_prev_log_term(request.prevLogTerm);
+        proto.set_prev_log_index(static_cast<int64_t>(request.prevLogIndex));
+        proto.set_prev_log_term(static_cast<int64_t>(request.prevLogTerm));
         for (const auto& entry : request.entries)
         {
             *proto.add_entries() = toProto(entry);
         }
-        proto.set_leader_commit(request.leaderCommit);
+        proto.set_leader_commit(static_cast<int64_t>(request.leaderCommit));
         return proto;
     }
 
     inline AppendEntriesRequest fromProto(const raft_protos::AppendEntriesRequest& proto)
     {
         AppendEntriesRequest request {
-            .term = proto.term(),
+            .term = static_cast<uint64_t>(proto.term()),
             .leaderID = proto.leader_id(),
-            .prevLogIndex = proto.prev_log_index(),
-            .prevLogTerm = proto.prev_log_term(),
-            .leaderCommit = proto.leader_commit(),
+            .prevLogIndex = static_cast<uint64_t>(proto.prev_log_index()),
+            .prevLogTerm = static_cast<uint64_t>(proto.prev_log_term()),
+            .leaderCommit = static_cast<uint64_t>(proto.leader_commit()),
         };
         for (const auto& entry : proto.entries())
         {
@@ -66,18 +66,18 @@ namespace raft::data
         return request;
     }
 
-    inline raft_protos::AppendEntriesReply toProto(const AppendEntriesResponse& response)
+    inline raft_protos::AppendEntriesResponse toProto(const AppendEntriesResponse& response)
     {
-        raft_protos::AppendEntriesReply proto;
-        proto.set_term(response.term);
+        raft_protos::AppendEntriesResponse proto;
+        proto.set_term(static_cast<int64_t>(response.term));
         proto.set_success(response.success);
         return proto;
     }
 
-    inline AppendEntriesResponse fromProto(const raft_protos::AppendEntriesReply& proto)
+    inline AppendEntriesResponse fromProto(const raft_protos::AppendEntriesResponse& proto)
     {
         return AppendEntriesResponse {
-            .term = proto.term(),
+            .term = static_cast<uint64_t>(proto.term()),
             .success = proto.success(),
         };
     }
@@ -85,35 +85,35 @@ namespace raft::data
     inline raft_protos::RequestVoteRequest toProto(const RequestVoteRequest& request)
     {
         raft_protos::RequestVoteRequest proto;
-        proto.set_term(request.term);
+        proto.set_term(static_cast<int64_t>(request.term));
         proto.set_candidate_id(request.candidateID);
-        proto.set_last_log_index(request.lastLogIndex);
-        proto.set_last_log_term(request.lastLogTerm);
+        proto.set_last_log_index(static_cast<int64_t>(request.lastLogIndex));
+        proto.set_last_log_term(static_cast<int64_t>(request.lastLogTerm));
         return proto;
     }
 
     inline RequestVoteRequest fromProto(const raft_protos::RequestVoteRequest& proto)
     {
         return RequestVoteRequest {
-            .term = proto.term(),
+            .term = static_cast<uint64_t>(proto.term()),
             .candidateID = proto.candidate_id(),
-            .lastLogIndex = proto.last_log_index(),
-            .lastLogTerm = proto.last_log_term(),
+            .lastLogIndex = static_cast<uint64_t>(proto.last_log_index()),
+            .lastLogTerm = static_cast<uint64_t>(proto.last_log_term()),
         };
     }
 
-    inline raft_protos::RequestVoteReply toProto(const RequestVoteResponse& response)
+    inline raft_protos::RequestVoteResponse toProto(const RequestVoteResponse& response)
     {
-        raft_protos::RequestVoteReply proto;
-        proto.set_term(response.term);
+        raft_protos::RequestVoteResponse proto;
+        proto.set_term(static_cast<int64_t>(response.term));
         proto.set_vote_granted(response.voteGranted);
         return proto;
     }
 
-    inline RequestVoteResponse fromProto(const raft_protos::RequestVoteReply& proto)
+    inline RequestVoteResponse fromProto(const raft_protos::RequestVoteResponse& proto)
     {
         return RequestVoteResponse {
-            .term = proto.term(),
+            .term = static_cast<uint64_t>(proto.term()),
             .voteGranted = proto.vote_granted(),
         };
     }
@@ -121,20 +121,20 @@ namespace raft::data
     inline raft_protos::PersistedState toProto(const PersistedState& state)
     {
         raft_protos::PersistedState proto;
-        proto.set_term(state.term);
+        proto.set_term(static_cast<int64_t>(state.term));
         for (const auto& entry : state.entries)
         {
             *proto.add_entries() = toProto(entry);
         }
-        proto.set_commit_index(state.commitIndex);
+        proto.set_commit_index(static_cast<int64_t>(state.commitIndex));
         return proto;
     }
 
     inline PersistedState fromProto(const raft_protos::PersistedState& proto)
     {
         PersistedState state {
-            .term = proto.term(),
-            .commitIndex = proto.commit_index(),
+            .term = static_cast<uint64_t>(proto.term()),
+            .commitIndex = static_cast<uint64_t>(proto.commit_index()),
         };
         for (const auto& entry : proto.entries())
         {

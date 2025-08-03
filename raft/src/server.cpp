@@ -1,11 +1,14 @@
 #include "raft/server.hpp"
 
 #include <grpcpp/grpcpp.h>
+#include <spdlog/spdlog.h>
 
 #include "asio.hpp"
 #include "common/mpsc_queue.hpp"
 #include "fmt/core.h"
 #include "impl/persistence.hpp"
+#include "impl/state.hpp"
+#include "raft/fmt/errors.hpp"
 #include "raft_protos/raft.grpc.pb.h"
 #include "utils/grpc_data.hpp"
 #include "utils/grpc_errors.hpp"
@@ -15,21 +18,6 @@ namespace raft
     namespace
     {
         using common::MPSCQueue;
-
-        // LeaderClientInfo contains the state needed to manage the replication of log entries to a
-        // single follower.
-        struct LeaderClientInfo
-        {
-            // The index of the next log entry to send to the replica.
-            uint64_t nextIndex = 0;
-            // The index of the highest log entry known to be replicated.
-            uint64_t matchIndex = 0;
-            std::unique_ptr<asio::steady_timer> heartbeatTimer;
-            // The maximum number of log entries to send in a single AppendEntries request.
-            // TODO: this will be adjusted dynamically based on the replica's responses.
-            uint64_t batchSize = 1;
-        };
-
         struct ClientInfo
         {
             std::unique_ptr<Client> client;
@@ -45,31 +33,40 @@ namespace raft
             // will be 10.
             uint64_t baseIndex;
 
-            data::LogEntry& get(uint64_t index) { return entries[index - baseIndex]; }
-
-            [[nodiscard]] data::LogEntry const& get(uint64_t index) const
+            data::LogEntry* get(uint64_t index)
             {
-                return entries[index - baseIndex];
+                size_t offset = index - baseIndex;
+                if (offset >= entries.size())
+                {
+                    return nullptr;
+                }
+                return &entries[offset];
+            }
+
+            [[nodiscard]] data::LogEntry const* get(uint64_t index) const
+            {
+                size_t offset = index - baseIndex;
+                if (offset >= entries.size())
+                {
+                    return nullptr;
+                }
+                return &entries[offset];
+            }
+
+            // The index of the last entry in the log, or baseIndex - 1 if the log is empty.
+            uint64_t lastIndex() const { return baseIndex + entries.size() - 1; }
+
+            // The term of the last entry in the log, or 0 if the log is empty.
+            uint64_t lastTerm() const
+            {
+                const auto* entry = get(lastIndex());
+                if (entry == nullptr)
+                {
+                    return 0;
+                }
+                return entry->term;
             }
         };
-
-        struct CandidateInfo
-        {
-            uint64_t voteCount;  // The number of votes received.
-        };
-
-        struct LeaderInfo
-        {
-            std::unordered_map<std::string, LeaderClientInfo>
-                clients;  // The state of each replica by ID.
-        };
-
-        struct FollowerInfo
-        {
-            std::optional<std::string> votedFor;
-        };
-
-        using State = std::variant<CandidateInfo, LeaderInfo, FollowerInfo>;
 
         enum class Lifecycle : uint8_t
         {
@@ -87,9 +84,7 @@ namespace raft
         // ServerImpl is the implementation of the Raft server.
         // Note that this server does not conform to RAII. If not shutdown,
         // the server will run indefinitely and manage its own lifecycle.
-        class ServerImpl final
-            : public Server
-            , std::enable_shared_from_this<ServerImpl>
+        class ServerImpl final : public Server
         {
           public:
             ServerImpl(std::string id,
@@ -117,7 +112,7 @@ namespace raft
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
                 override;
 
-            [[nodiscard]] std::optional<std::string> getLeaderID() const override;
+            [[nodiscard]] tl::expected<std::string, Error> getLeaderID() const override;
 
             tl::expected<EntryInfo, Error> append(std::vector<std::byte> data) override;
 
@@ -163,6 +158,18 @@ namespace raft
             // postPersist serializes the current state and creates a new persist request to the
             // persistence handler.
             void postPersist(std::function<void(tl::expected<void, Error>)> callback) const;
+            // postRequestVote issues a RequestVote request to the specified replica.
+            void postRequestVote(
+                const ClientInfo& client,
+                const data::RequestVoteRequest& request,
+                std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
+
+            void onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response);
+
+            // becomeFollower transitions the server to the Follower state.
+            void becomeFollower();
+            // becomeLeader transitions the server to the Leader state.
+            void becomeLeader();
 
             std::atomic<Lifecycle> lifecycle_ {Lifecycle::Initialized};
             std::once_flag startFlag_;
@@ -188,7 +195,7 @@ namespace raft
             std::optional<std::string> leaderAddress_;
             uint64_t term_ = 0;
             uint64_t commitIndex_ = 0;
-            // The log starts at index 0.
+            // The log starts at index 1.
             Log log_ {};
             uint64_t timeoutInterval_;
             uint64_t heartbeatInterval_;
@@ -201,6 +208,8 @@ namespace raft
 
             std::unique_ptr<impl::PersistenceHandler> persistenceHandler_;
             std::unique_ptr<asio::steady_timer> timer_;
+
+            RequestConfig requestConfig_ = {};
         };
     }  // namespace
 
@@ -243,7 +252,7 @@ namespace raft
             }
             term_ = state->term;
             commitIndex_ = state->commitIndex;
-            log_ = Log {.entries = std::move(state->entries), .baseIndex = 0};
+            log_ = Log {.entries = std::move(state->entries), .baseIndex = 1};
         }
 
         clients_.clear();
@@ -299,6 +308,11 @@ namespace raft
 
     void ServerImpl::scheduleTimeout()
     {
+        auto guard = work_;
+        if (shutdownCalled())
+        {
+            return;
+        }
         if (!timer_)
         {
             timer_ = std::make_unique<asio::steady_timer>(io_);
@@ -316,7 +330,7 @@ namespace raft
             });
     }
 
-    tl::expected<void, Error> ServerImpl::start() override
+    tl::expected<void, Error> ServerImpl::start()
     {
         if (shutdownCalled())
         {
@@ -353,6 +367,7 @@ namespace raft
 
     tl::expected<uint64_t, Error> ServerImpl::getTerm() const
     {
+        auto guard = work_;
         if (shutdownCalled())
         {
             return tl::make_unexpected(errors::NotRunning {});
@@ -367,6 +382,7 @@ namespace raft
 
     tl::expected<uint64_t, Error> ServerImpl::getCommitIndex() const
     {
+        auto guard = work_;
         if (shutdownCalled())
         {
             return tl::make_unexpected(errors::NotRunning {});
@@ -382,6 +398,7 @@ namespace raft
 
     tl::expected<uint64_t, Error> ServerImpl::getLogByteCount() const
     {
+        auto guard = work_;
         if (shutdownCalled())
         {
             return tl::make_unexpected(errors::NotRunning {});
@@ -395,8 +412,13 @@ namespace raft
         return future.get();
     }
 
-    std::optional<std::string> ServerImpl::getLeaderID() const
+    tl::expected<std::string, Error> ServerImpl::getLeaderID() const
     {
+        auto guard = work_;
+        if (shutdownCalled())
+        {
+            return tl::make_unexpected(errors::NotRunning {});
+        }
         std::promise<std::optional<std::string>> promise;
         auto future = promise.get_future();
         asio::post(strand_,
@@ -405,11 +427,17 @@ namespace raft
                        processGetLeaderID([&promise](std::optional<std::string> id)
                                           { promise.set_value(id); });
                    });
-        return future.get();
+        auto result = future.get();
+        if (!result)
+        {
+            return tl::make_unexpected(errors::UnknownLeader {});
+        }
+        return result.value();
     }
 
     tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
     {
+        auto guard = work_;
         if (shutdownCalled())
         {
             return tl::make_unexpected(errors::NotRunning {});
@@ -448,6 +476,21 @@ namespace raft
         term_++;
         state_ = CandidateInfo {};
         scheduleTimeout();
+
+        data::RequestVoteRequest request {
+            .term = term_,
+            .candidateID = id_,
+            .lastLogIndex = log_.lastIndex(),
+            .lastLogTerm = log_.lastTerm(),
+        };
+
+        for (auto& client : clients_)
+        {
+            postRequestVote(client,
+                            request,
+                            [this](tl::expected<data::RequestVoteResponse, Error> response)
+                            { onRequestVoteResponse(std::move(response)); });
+        }
     }
 
     void ServerImpl::processHeartbeatTimeout()
@@ -507,6 +550,62 @@ namespace raft
             asio::post(strand_, [callback] { callback({}); });
         };
         persistenceHandler_->addRequest(impl::PersistenceRequest {.data = data, .callback = cb});
+    }
+
+    void ServerImpl::postRequestVote(
+        const ClientInfo& client,
+        const data::RequestVoteRequest& request,
+        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
+    {
+        client.client->requestVote(request,
+                                   requestConfig_,
+                                   [this, guard = work_, callback = std::move(callback)](
+                                       tl::expected<data::RequestVoteResponse, Error> response)
+                                   {
+                                       (void)guard;
+                                       callback(std::move(response));
+                                   });
+    }
+
+    void ServerImpl::onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response)
+    {
+        if (!response)
+        {
+            spdlog::warn("failed to process RequestVote response: {}", response.error());
+            return;
+        }
+
+        const auto& voteResponse = *response;
+        if (voteResponse.term < term_)
+        {
+            // We have already moved on to a newer term, so we ignore this response.
+            return;
+        }
+        if (voteResponse.term > term_)
+        {
+            term_ = voteResponse.term;
+            becomeFollower();
+            return;
+        }
+
+        if (!std::holds_alternative<CandidateInfo>(state_))
+        {
+            spdlog::error("Received RequestVote response in unexpected state: {}", state_);
+            return;
+        }
+        auto& candidateInfo = std::get<CandidateInfo>(state_);
+        if (!voteResponse.voteGranted)
+        {
+            return;
+        }
+        candidateInfo.voteCount++;
+        auto neededVotes = (clients_.size() / 2) + 1;
+        if (candidateInfo.voteCount < neededVotes)
+        {
+            return;
+        }
+        // We have enough votes to become the leader.
+        becomeLeader();
     }
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ostream>
 #include <string>
 #include <variant>
 
@@ -21,8 +22,6 @@ namespace raft
         struct InvalidArgument
         {
             std::string message;  ///< The error message.
-
-            bool operator==(const InvalidArgument& other) const = default;
         };
 
         /// The replica is not the leader.
@@ -49,6 +48,11 @@ namespace raft
         struct Deserialization
         {
         };
+
+        // The leader is unknown or does not exist.
+        struct UnknownLeader
+        {
+        };
     }  // namespace errors
 
     using Error = std::variant<errors::Timeout,
@@ -58,5 +62,7 @@ namespace raft
                                errors::AlreadyRunning,
                                errors::NotRunning,
                                errors::FailedToStart,
-                               errors::Deserialization>;
+                               errors::Deserialization,
+                               errors::UnknownLeader>;
+
 }  // namespace raft

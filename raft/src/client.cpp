@@ -44,7 +44,7 @@ namespace raft
                 {
                     std::unique_ptr<grpc::ClientContext> context;
                     std::unique_ptr<raft_protos::AppendEntriesRequest> request;
-                    std::unique_ptr<raft_protos::AppendEntriesReply> reply;
+                    std::unique_ptr<raft_protos::AppendEntriesResponse> reply;
                     std::function<void(tl::expected<AppendEntriesResponse, Error>)> callback;
                 };
 
@@ -52,7 +52,7 @@ namespace raft
                 params->context = std::move(context);
                 params->request =
                     std::make_unique<raft_protos::AppendEntriesRequest>(std::move(protoRequest));
-                params->reply = std::make_unique<raft_protos::AppendEntriesReply>();
+                params->reply = std::make_unique<raft_protos::AppendEntriesResponse>();
                 params->callback = std::move(callback);
 
                 stub_->async()->AppendEntries(
@@ -85,7 +85,7 @@ namespace raft
                 {
                     std::unique_ptr<grpc::ClientContext> context;
                     std::unique_ptr<raft_protos::RequestVoteRequest> request;
-                    std::unique_ptr<raft_protos::RequestVoteReply> reply;
+                    std::unique_ptr<raft_protos::RequestVoteResponse> reply;
                     std::function<void(tl::expected<RequestVoteResponse, Error>)> callback;
                 };
 
@@ -93,7 +93,7 @@ namespace raft
                 params->context = std::move(context);
                 params->request =
                     std::make_unique<raft_protos::RequestVoteRequest>(std::move(protoRequest));
-                params->reply = std::make_unique<raft_protos::RequestVoteReply>();
+                params->reply = std::make_unique<raft_protos::RequestVoteResponse>();
                 params->callback = std::move(callback);
 
                 stub_->async()->RequestVote(
