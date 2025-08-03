@@ -64,8 +64,9 @@ namespace raft
         std::optional<CommitCallback> commitCallback;  ///< The commit callback to use.
         std::optional<LeaderChangedCallback>
             leaderChangedCallback;  ///< The leader changed callback to use.
-        TimeoutInterval timeoutInterval;
-        uint64_t heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
+        TimeoutInterval timeoutInterval;  ///< The election timeout interval.
+        uint64_t heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;  ///< The heartbeat interval.
+        uint16_t threadCount = 1;  ///< The number of threads to use for network I/O and consensus.
     };
 
     /// A service handler for the Raft server.
@@ -76,15 +77,17 @@ namespace raft
 
         /// Handles an AppendEntries request.
         /// @param request The AppendEntries request to handle.
-        /// @return The AppendEntries response or an error.
-        virtual tl::expected<data::AppendEntriesResponse, Error> handleAppendEntries(
-            const data::AppendEntriesRequest& request) = 0;
+        /// @param callback The callback to invoke with the response or error.
+        virtual void handleAppendEntries(
+            const data::AppendEntriesRequest& request,
+            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback) = 0;
 
         /// Handles a RequestVote request.
         /// @param request The RequestVote request to handle.
-        /// @return The RequestVote response or an error.
-        virtual tl::expected<data::RequestVoteResponse, Error> handleRequestVote(
-            const data::RequestVoteRequest& request) = 0;
+        /// @param callback The callback to invoke with the response or error.
+        virtual void handleRequestVote(
+            const data::RequestVoteRequest& request,
+            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback) = 0;
     };
 
     /// The Raft server interface. This is the main interface for the Raft server. ALl functions are
@@ -93,7 +96,9 @@ namespace raft
     {
       public:
         /// Starts Raft consensus.
-        virtual void start() = 0;
+        virtual tl::expected<void, Error> start() = 0;
+        // Shuts down the Raft server.
+        virtual void shutdown() = 0;
 
         /// Returns the ID of the last-known leader, or std::nullopt if either no leader exists or
         /// the leader is unknown.
@@ -117,17 +122,17 @@ namespace raft
         /// @param callback The callback function to set.
         virtual void setLeaderChangedCallback(LeaderChangedCallback callback) = 0;
 
-        /// Returns the current term.
+        /// Returns the current term. If the server has shut down, returns an error.
         /// @return The current term.
-        [[nodiscard]] virtual uint64_t getTerm() const = 0;
+        [[nodiscard]] virtual tl::expected<uint64_t, Error> getTerm() const = 0;
 
         /// Returns the current commit index.
         /// @return The current commit index.
-        [[nodiscard]] virtual uint64_t getCommitIndex() const = 0;
+        [[nodiscard]] virtual tl::expected<uint64_t, Error> getCommitIndex() const = 0;
 
         /// Returns the total size of the log in bytes, which may be useful for snapshot strategy.
         /// @return The total byte count of the log.
-        [[nodiscard]] virtual uint64_t getLogByteCount() const = 0;
+        [[nodiscard]] virtual tl::expected<uint64_t, Error> getLogByteCount() const = 0;
 
         // Returns the ID of the server.
         [[nodiscard]] virtual std::string getId() const = 0;

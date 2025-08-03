@@ -14,7 +14,7 @@ namespace raft
 
         // GrpcServiceImpl forwards requests to the ServiceHandler and converts the data between the
         // internal and external representations.
-        class GrpcServiceImpl final : public raft_protos::Raft::Service
+        class GrpcServiceImpl final : public raft_protos::Raft::CallbackService
         {
           public:
             explicit GrpcServiceImpl(ServiceHandler& handler)
@@ -22,32 +22,51 @@ namespace raft
             {
             }
 
-            grpc::Status AppendEntries(grpc::ServerContext* context,
-                                       const raft_protos::AppendEntriesRequest* request,
-                                       raft_protos::AppendEntriesReply* response) override
+
+            grpc::ServerUnaryReactor* AppendEntries(
+                grpc::CallbackServerContext* context,
+                const raft_protos::AppendEntriesRequest* request,
+                raft_protos::AppendEntriesReply* response) override
             {
+                auto* reactor = context->DefaultReactor();
                 auto internalRequest = data::fromProto(*request);
-                auto result = handler_.get().handleAppendEntries(internalRequest);
-                if (!result)
+
+                auto callback =
+                    [reactor, response](tl::expected<data::AppendEntriesResponse, Error> result)
                 {
-                    return errors::toGrpcStatus(result.error());
-                }
-                *response = data::toProto(*result);
-                return grpc::Status::OK;
+                    if (!result)
+                    {
+                        reactor->Finish(errors::toGrpcStatus(result.error()));
+                        return;
+                    }
+                    *response = data::toProto(*result);
+                    reactor->Finish(grpc::Status::OK);
+                };
+                handler_.get().handleAppendEntries(internalRequest, callback);
+                return reactor;
             }
 
-            grpc::Status RequestVote(grpc::ServerContext* context,
-                                     const raft_protos::RequestVoteRequest* request,
-                                     raft_protos::RequestVoteReply* response) override
+            grpc::ServerUnaryReactor* RequestVote(
+                grpc::CallbackServerContext* context,
+                const raft_protos::RequestVoteRequest* request,
+                raft_protos::RequestVoteReply* response) override
             {
+                auto* reactor = context->DefaultReactor();
                 auto internalRequest = data::fromProto(*request);
-                auto result = handler_.get().handleRequestVote(internalRequest);
-                if (!result)
+
+                auto callback =
+                    [reactor, response](tl::expected<data::RequestVoteResponse, Error> result)
                 {
-                    return errors::toGrpcStatus(result.error());
-                }
-                *response = data::toProto(*result);
-                return grpc::Status::OK;
+                    if (!result)
+                    {
+                        reactor->Finish(errors::toGrpcStatus(result.error()));
+                        return;
+                    }
+                    *response = data::toProto(*result);
+                    reactor->Finish(grpc::Status::OK);
+                };
+                handler_.get().handleRequestVote(internalRequest, callback);
+                return reactor;
             }
 
           private:

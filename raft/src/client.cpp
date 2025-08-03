@@ -32,8 +32,8 @@ namespace raft
 
             void appendEntries(
                 AppendEntriesRequest request,
-                std::function<void(tl::expected<AppendEntriesResponse, Error>)> callback,
-                RequestConfig config) override
+                RequestConfig config,
+                std::function<void(tl::expected<AppendEntriesResponse, Error>)> callback) override
             {
                 auto context = std::make_unique<grpc::ClientContext>();
                 configureContext(*context, config);
@@ -73,8 +73,8 @@ namespace raft
             }
 
             void requestVote(RequestVoteRequest request,
-                             std::function<void(tl::expected<RequestVoteResponse, Error>)> callback,
-                             RequestConfig config) override
+                             RequestConfig config,
+                             std::function<void(tl::expected<RequestVoteResponse, Error>)> callback) override
             {
                 auto context = std::make_unique<grpc::ClientContext>();
                 configureContext(*context, config);

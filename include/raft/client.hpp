@@ -88,21 +88,21 @@ namespace raft
 
         /// Send an AppendEntries request to the server.
         /// @param request The AppendEntries request to send.
-        /// @param callback The callback to invoke with the response or error.
         /// @param config The configuration for the request.
+        /// @param callback The callback to invoke with the response or error.
         virtual void appendEntries(
             data::AppendEntriesRequest request,
-            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback,
-            RequestConfig config) = 0;
+            RequestConfig config,
+            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback) = 0;
 
         /// Send a RequestVote request to the server.
         /// @param request The RequestVote request to send.
-        /// @param callback The callback to invoke with the response or error.
         /// @param config The configuration for the request.
+        /// @param callback The callback to invoke with the response or error.
         virtual void requestVote(
             data::RequestVoteRequest request,
-            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback,
-            RequestConfig config) = 0;
+            RequestConfig config,
+            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback) = 0;
     };
 
     /// Creates a new Raft client that connects to the specified address.

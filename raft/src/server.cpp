@@ -47,97 +47,11 @@ namespace raft
 
             data::LogEntry& get(uint64_t index) { return entries[index - baseIndex]; }
 
-            data::LogEntry const& get(uint64_t index) const { return entries[index - baseIndex]; }
+            [[nodiscard]] data::LogEntry const& get(uint64_t index) const
+            {
+                return entries[index - baseIndex];
+            }
         };
-
-        namespace events
-        {
-            // Timeout occurs when the election timeout elapses.
-            struct Timeout
-            {
-            };
-
-            // HeartbeatTimeout occurs when the heartbeat timeout elapses.
-            struct HeartbeatTimeout
-            {
-                std::string id;  // The ID of the replica that timed out.
-            };
-
-            // AppendEntriesResponse is the response to an AppendEntries request.
-            struct AppendEntriesResponse
-            {
-                data::AppendEntriesRequest request;  // The request that triggered the response.
-                data::AppendEntriesResponse response;
-            };
-
-            // RequestVoteResponse is the response to a RequestVote request.
-            struct RequestVoteResponse
-            {
-                data::RequestVoteRequest request;
-                data::RequestVoteResponse response;
-            };
-
-            // An AppendEntries event is created when this replica receives an AppendEntries
-            // request.
-            struct AppendEntries
-            {
-                data::AppendEntriesRequest request;
-                std::promise<tl::expected<data::AppendEntriesResponse, Error> > promise;
-            };
-
-            // A RequestVote event is created when this replica receives a RequestVote request.
-            struct RequestVote
-            {
-                data::RequestVoteRequest request;
-                std::promise<tl::expected<data::RequestVoteResponse, Error> > promise;
-            };
-
-            struct GetTerm
-            {
-                std::promise<uint64_t> promise;
-            };
-
-            struct GetCommitIndex
-            {
-                std::promise<uint64_t> promise;
-            };
-
-            struct GetLogByteCount
-            {
-                std::promise<uint64_t> promise;
-            };
-
-            struct GetLeaderID
-            {
-                std::promise<std::optional<std::string> > promise;
-            };
-
-            // PersistenceComplete is created by the IO thread when persistence is complete.
-            struct PersistenceComplete
-            {
-                // The callback that the event loop should run when persistence is complete.
-                std::function<void()> callback;
-            };
-
-            struct Append
-            {
-                std::vector<std::byte> data;
-                std::promise<tl::expected<EntryInfo, Error> > promise;
-            };
-        }  // namespace events
-
-        using Event = std::variant<events::Timeout,
-                                   events::HeartbeatTimeout,
-                                   events::AppendEntriesResponse,
-                                   events::RequestVoteResponse,
-                                   events::AppendEntries,
-                                   events::RequestVote,
-                                   events::GetTerm,
-                                   events::GetCommitIndex,
-                                   events::GetLogByteCount,
-                                   events::GetLeaderID,
-                                   events::PersistenceComplete,
-                                   events::Append>;
 
         struct CandidateInfo
         {
@@ -146,7 +60,8 @@ namespace raft
 
         struct LeaderInfo
         {
-            std::unordered_map<std::string, LeaderClientInfo> clients;
+            std::unordered_map<std::string, LeaderClientInfo>
+                clients;  // The state of each replica by ID.
         };
 
         struct FollowerInfo
@@ -156,13 +71,25 @@ namespace raft
 
         using State = std::variant<CandidateInfo, LeaderInfo, FollowerInfo>;
 
+        enum class Lifecycle : uint8_t
+        {
+            Initialized,
+            Running,
+            Stopping,
+            Stopped
+        };
+
         // The maximum scheduled interval in microseconds between persistence events.
         constexpr std::chrono::microseconds MAX_PERSISTENCE_INTERVAL(1000);
         // The maximum number of log entries before persistence is triggered.
         constexpr uint64_t MAX_LOG_ENTRIES(1024);
 
         // ServerImpl is the implementation of the Raft server.
-        class ServerImpl final : public Server
+        // Note that this server does not conform to RAII. If not shutdown,
+        // the server will run indefinitely and manage its own lifecycle.
+        class ServerImpl final
+            : public Server
+            , std::enable_shared_from_this<ServerImpl>
         {
           public:
             ServerImpl(std::string id,
@@ -171,28 +98,24 @@ namespace raft
                        std::optional<CommitCallback> commitCallback,
                        std::optional<LeaderChangedCallback> leaderChangedCallback,
                        TimeoutInterval timeoutInterval,
-                       uint64_t heartbeatInterval)
-                : id_(std::move(id))
-                , clientFactory_(std::move(clientFactory))
-                , persister_(std::move(persister))
-                , commitCallback_(std::move(commitCallback))
-                , leaderChangedCallback_(std::move(leaderChangedCallback))
-                , timeoutInterval_(timeoutInterval.sample(gen_))
-                , heartbeatInterval_(heartbeatInterval)
-            {
-            }
+                       uint64_t heartbeatInterval);
 
             ~ServerImpl() override;
 
-            tl::expected<void, Error> init(const std::vector<Peer>& peers);
+            tl::expected<void, Error> init(const std::vector<Peer>& peers, uint16_t threadCount);
 
-            void start() override;
+            tl::expected<void, Error> start() override;
+            void shutdown() override;
 
-            tl::expected<data::AppendEntriesResponse, Error> handleAppendEntries(
-                const data::AppendEntriesRequest& request) override;
+            void handleAppendEntries(
+                const data::AppendEntriesRequest& request,
+                std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
+                override;
 
-            tl::expected<data::RequestVoteResponse, Error> handleRequestVote(
-                const data::RequestVoteRequest& request) override;
+            void handleRequestVote(
+                const data::RequestVoteRequest& request,
+                std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
+                override;
 
             [[nodiscard]] std::optional<std::string> getLeaderID() const override;
 
@@ -202,49 +125,51 @@ namespace raft
 
             void setLeaderChangedCallback(LeaderChangedCallback callback) override;
 
-            [[nodiscard]] uint64_t getTerm() const override;
+            [[nodiscard]] tl::expected<uint64_t, Error> getTerm() const override;
 
-            [[nodiscard]] uint64_t getCommitIndex() const override;
+            [[nodiscard]] tl::expected<uint64_t, Error> getCommitIndex() const override;
 
-            [[nodiscard]] uint64_t getLogByteCount() const override;
+            [[nodiscard]] tl::expected<uint64_t, Error> getLogByteCount() const override;
 
             [[nodiscard]] std::string getId() const override;
 
           private:
+            data::PersistedState getPersistedState() const;
+            bool shutdownCalled() const
+            {
+                return lifecycle_ == Lifecycle::Stopped || lifecycle_ == Lifecycle::Stopping;
+            }
+
+            // Resets the timer and schedules it to run at the next timeout interval.
             void scheduleTimeout();
+            // Resets the heartbeat timer and schedules it to run at the next heartbeat interval.
+            void scheduleHeartbeatTimeout();
 
-            void onTimeout(asio::error_code ec);
+            void processTimeout();
+            void processHeartbeatTimeout();
+            void processAppend(const std::vector<std::byte>& data,
+                               std::function<void(tl::expected<EntryInfo, Error>)> callback);
+            void processInboundAppendEntries(
+                const data::AppendEntriesRequest& request,
+                std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback);
+            void processInboundRequestVote(
+                const data::RequestVoteRequest& request,
+                std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
+            void processGetTerm(std::function<void(uint64_t)> callback) const;
+            void processGetCommitIndex(std::function<void(uint64_t)> callback) const;
+            void processGetLogByteCount(std::function<void(uint64_t)> callback) const;
+            void processGetLeaderID(std::function<void(std::optional<std::string>)> callback) const;
 
-            void eventLoop();
+            // postPersist serializes the current state and creates a new persist request to the
+            // persistence handler.
+            void postPersist(std::function<void(tl::expected<void, Error>)> callback) const;
 
-            void process(Event& event);
-
-            void process(const events::Timeout& event);
-
-            void process(const events::HeartbeatTimeout& event);
-
-            void process(const events::AppendEntriesResponse& event);
-
-            void process(const events::RequestVoteResponse& event);
-
-            void process(events::AppendEntries& event);
-
-            void process(events::RequestVote& event);
-
-            void process(events::GetTerm& event);
-
-            void process(events::GetCommitIndex& event);
-
-            void process(events::GetLogByteCount& event);
-
-            void process(events::GetLeaderID& event);
-
-            void process(const events::PersistenceComplete& event);
-
-            void process(events::Append& event);
-
+            std::atomic<Lifecycle> lifecycle_ {Lifecycle::Initialized};
+            std::once_flag startFlag_;
             // The global lock for the server.
             std::mutex mutex_;
+            asio::io_context io_;
+            asio::executor_work_guard<asio::io_context::executor_type> work_;
 
             std::random_device rng_;
             std::mt19937 gen_ {rng_()};
@@ -263,6 +188,7 @@ namespace raft
             std::optional<std::string> leaderAddress_;
             uint64_t term_ = 0;
             uint64_t commitIndex_ = 0;
+            // The log starts at index 0.
             Log log_ {};
             uint64_t timeoutInterval_;
             uint64_t heartbeatInterval_;
@@ -270,27 +196,56 @@ namespace raft
 
             std::optional<std::string> lastLeaderID_;
 
-            std::optional<std::thread> eventThread_;
-            mutable MPSCQueue<Event> events_;
+            mutable asio::strand<asio::io_context::executor_type> strand_;
+            std::vector<std::thread> threads_;
 
             std::unique_ptr<impl::PersistenceHandler> persistenceHandler_;
-
-            asio::io_context io_ {};
             std::unique_ptr<asio::steady_timer> timer_;
         };
     }  // namespace
 
-    ServerImpl::~ServerImpl()
+    ServerImpl::ServerImpl(std::string id,
+                           std::unique_ptr<ClientFactory> clientFactory,
+                           std::shared_ptr<Persister> persister,
+                           std::optional<CommitCallback> commitCallback,
+                           std::optional<LeaderChangedCallback> leaderChangedCallback,
+                           TimeoutInterval timeoutInterval,
+                           uint64_t heartbeatInterval)
+        : work_(io_.get_executor())
+        , id_(std::move(id))
+        , clientFactory_(std::move(clientFactory))
+        , persister_(std::move(persister))
+        , commitCallback_(std::move(commitCallback))
+        , leaderChangedCallback_(std::move(leaderChangedCallback))
+        , timeoutInterval_(timeoutInterval.sample(gen_))
+        , heartbeatInterval_(heartbeatInterval)
+        , strand_(io_.get_executor())
     {
-        events_.close();
-        if (eventThread_)
-        {
-            eventThread_->join();
-        }
     }
 
-    tl::expected<void, Error> ServerImpl::init(const std::vector<Peer>& peers)
+    ServerImpl::~ServerImpl()
     {
+        shutdown();
+    }
+
+    tl::expected<void, Error> ServerImpl::init(const std::vector<Peer>& peers, uint16_t threadCount)
+    {
+        if (threadCount < 1)
+        {
+            return tl::make_unexpected(errors::InvalidArgument {"threadCount must be >= 1"});
+        }
+        if (auto result = persister_->loadState(); result.has_value())
+        {
+            auto state = data::deserialize(*result);
+            if (!state)
+            {
+                return tl::make_unexpected(state.error());
+            }
+            term_ = state->term;
+            commitIndex_ = state->commitIndex;
+            log_ = Log {.entries = std::move(state->entries), .baseIndex = 0};
+        }
+
         clients_.clear();
         clients_.reserve(peers.size());
         clientIndices_.clear();
@@ -313,174 +268,160 @@ namespace raft
             clients_.push_back(
                 ClientInfo {.client = std::move(*client), .id = peer.id, .address = peer.address});
         }
-        // Start the event loop here, even though Raft consensus has not started yet. This is so
+        // Start the asio threads here, even though Raft consensus has not started yet. This is so
         // that we can handle simple requests like GetTerm and GetCommitIndex immediately.
-        eventThread_.emplace([this] { eventLoop(); });
+        for (uint16_t i = 0; i < threadCount; i++)
+        {
+            threads_.emplace_back([this] { io_.run(); });
+        }
+
         return {};
+    }
+
+    void ServerImpl::shutdown()
+    {
+        if (shutdownCalled())
+        {
+            return;
+        }
+
+        work_.reset();
+        for (auto& thread : threads_)
+        {
+            thread.join();
+        }
+    }
+
+    data::PersistedState ServerImpl::getPersistedState() const
+    {
+        return {.term = term_, .entries = log_.entries, .commitIndex = commitIndex_};
     }
 
     void ServerImpl::scheduleTimeout()
     {
+        if (!timer_)
+        {
+            timer_ = std::make_unique<asio::steady_timer>(io_);
+        }
         timer_->expires_from_now(asio::chrono::milliseconds(timeoutInterval_));
-        timer_->async_wait([this](asio::error_code ec) { onTimeout(ec); });
-    }
-
-    void ServerImpl::start()
-    {
-        std::lock_guard lock {mutex_};
-
-        persistenceHandler_ = std::make_unique<impl::PersistenceHandler>(
-            persister_, MAX_PERSISTENCE_INTERVAL, MAX_LOG_ENTRIES);
-        scheduleTimeout();
-    }
-
-    void ServerImpl::eventLoop()
-    {
-        while (true)
-        {
-            auto event = events_.pop();
-            if (!event)
+        timer_->async_wait(
+            [this](asio::error_code ec)
             {
-                break;
-            }
-            process(*event);
-        }
+                if (ec)
+                {
+                    return;
+                }
+                asio::post(strand_, [this] { processTimeout(); });
+                scheduleTimeout();
+            });
     }
 
-    void ServerImpl::process(Event& event)
+    tl::expected<void, Error> ServerImpl::start() override
     {
-        std::visit([this](auto& e) { process(e); }, event);
-    }
-
-    void ServerImpl::process(const events::Timeout& event)
-    {
-        term_++;
-    }
-
-    void ServerImpl::process(const events::HeartbeatTimeout& event)
-    {
-        // TODO: Implement heartbeat timeout handling
-    }
-
-    void ServerImpl::process(const events::AppendEntriesResponse& event)
-    {
-        // TODO: Implement AppendEntries response handling
-    }
-
-    void ServerImpl::process(const events::RequestVoteResponse& event)
-    {
-        // TODO: Implement RequestVote response handling
-    }
-
-    void ServerImpl::process(events::AppendEntries& event)
-    {
-        // TODO: Implement AppendEntries request handling
-    }
-
-    void ServerImpl::process(events::RequestVote& event)
-    {
-        // TODO: Implement RequestVote request handling
-    }
-
-    void ServerImpl::process(events::GetTerm& event)
-    {
-        event.promise.set_value(term_);
-    }
-
-    void ServerImpl::process(events::GetCommitIndex& event)
-    {
-        event.promise.set_value(commitIndex_);
-    }
-
-    void ServerImpl::process(events::GetLogByteCount& event)
-    {
-        // TODO: Calculate actual log byte count
-        event.promise.set_value(0);
-    }
-
-    void ServerImpl::process(events::GetLeaderID& event)
-    {
-        event.promise.set_value(lastLeaderID_);
-    }
-
-    void ServerImpl::process(const events::PersistenceComplete& event)
-    {
-        event.callback();
-    }
-
-    void ServerImpl::process(events::Append& event)
-    {
-        // TODO: Implement log append handling
-    }
-
-    void ServerImpl::onTimeout(asio::error_code ec)
-    {
-        if (ec)
+        if (shutdownCalled())
         {
-            return;
+            return tl::make_unexpected(errors::NotRunning {});
         }
-        events::Timeout event {};
-        events_.push(event);
-        scheduleTimeout();
+
+        std::call_once(startFlag_,
+                       [this]
+                       {
+                           persistenceHandler_ = std::make_unique<impl::PersistenceHandler>(
+                               persister_, MAX_PERSISTENCE_INTERVAL, MAX_LOG_ENTRIES);
+                           scheduleTimeout();
+                       });
+        return {};
     }
 
-    // Forwards an AppendEntries request to the event loop.
-    tl::expected<data::AppendEntriesResponse, Error> ServerImpl::handleAppendEntries(
-        const data::AppendEntriesRequest& request)
+    void ServerImpl::handleAppendEntries(
+        const data::AppendEntriesRequest& request,
+        std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
     {
-        events::AppendEntries event {request};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
+        asio::post(strand_,
+                   [this, request, callback = std::move(callback)]
+                   { processInboundAppendEntries(request, callback); });
+    }
+
+    void ServerImpl::handleRequestVote(
+        const data::RequestVoteRequest& request,
+        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
+    {
+        asio::post(strand_,
+                   [this, request, callback = std::move(callback)]
+                   { processInboundRequestVote(request, callback); });
+    }
+
+    tl::expected<uint64_t, Error> ServerImpl::getTerm() const
+    {
+        if (shutdownCalled())
+        {
+            return tl::make_unexpected(errors::NotRunning {});
+        }
+        std::promise<uint64_t> promise;
+        auto future = promise.get_future();
+        asio::post(strand_,
+                   [this, &promise]
+                   { processGetTerm([&promise](uint64_t term) { promise.set_value(term); }); });
         return future.get();
     }
 
-    // Forwards a RequestVote request to the event loop.
-    tl::expected<data::RequestVoteResponse, Error> ServerImpl::handleRequestVote(
-        const data::RequestVoteRequest& request)
+    tl::expected<uint64_t, Error> ServerImpl::getCommitIndex() const
     {
-        events::RequestVote event {request};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
+        if (shutdownCalled())
+        {
+            return tl::make_unexpected(errors::NotRunning {});
+        }
+        std::promise<uint64_t> promise;
+        auto future = promise.get_future();
+        asio::post(
+            strand_,
+            [this, &promise]
+            { processGetCommitIndex([&promise](uint64_t index) { promise.set_value(index); }); });
         return future.get();
     }
 
-    tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
+    tl::expected<uint64_t, Error> ServerImpl::getLogByteCount() const
     {
-        events::Append event {std::move(data)};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
-        return future.get();
-    }
-
-    uint64_t ServerImpl::getTerm() const
-    {
-        events::GetTerm event {};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
-        return future.get();
-    }
-
-    uint64_t ServerImpl::getCommitIndex() const
-    {
-        events::GetCommitIndex event {};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
-        return future.get();
-    }
-
-    uint64_t ServerImpl::getLogByteCount() const
-    {
-        events::GetLogByteCount event {};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
+        if (shutdownCalled())
+        {
+            return tl::make_unexpected(errors::NotRunning {});
+        }
+        std::promise<uint64_t> promise;
+        auto future = promise.get_future();
+        asio::post(
+            strand_,
+            [this, &promise]
+            { processGetLogByteCount([&promise](uint64_t count) { promise.set_value(count); }); });
         return future.get();
     }
 
     std::optional<std::string> ServerImpl::getLeaderID() const
     {
-        events::GetLeaderID event {};
-        auto future = event.promise.get_future();
-        events_.push(std::move(event));
+        std::promise<std::optional<std::string>> promise;
+        auto future = promise.get_future();
+        asio::post(strand_,
+                   [this, &promise]
+                   {
+                       processGetLeaderID([&promise](std::optional<std::string> id)
+                                          { promise.set_value(id); });
+                   });
+        return future.get();
+    }
+
+    tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
+    {
+        if (shutdownCalled())
+        {
+            return tl::make_unexpected(errors::NotRunning {});
+        }
+        std::promise<tl::expected<EntryInfo, Error>> promise;
+        auto future = promise.get_future();
+        asio::post(strand_,
+                   [this, data = std::move(data), &promise]() mutable
+                   {
+                       // TODO: Implement append handling
+                       promise.set_value(tl::make_unexpected(errors::Unimplemented {}));
+                   });
         return future.get();
     }
 
@@ -502,6 +443,72 @@ namespace raft
         leaderChangedCallback_ = callback;
     }
 
+    void ServerImpl::processTimeout()
+    {
+        term_++;
+        state_ = CandidateInfo {};
+        scheduleTimeout();
+    }
+
+    void ServerImpl::processHeartbeatTimeout()
+    {
+        // TODO: Implement heartbeat timeout processing
+    }
+
+    void ServerImpl::processInboundAppendEntries(
+        const data::AppendEntriesRequest& request,
+        std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
+    {
+        // TODO: Implement AppendEntries request handling
+        (void)request;
+        (void)callback;
+    }
+
+    void ServerImpl::processInboundRequestVote(
+        const data::RequestVoteRequest& request,
+        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
+    {
+        // TODO: Implement RequestVote request handling
+        (void)request;
+        (void)callback;
+    }
+
+    void ServerImpl::processGetTerm(std::function<void(uint64_t)> callback) const
+    {
+        callback(term_);
+    }
+
+    void ServerImpl::processGetCommitIndex(std::function<void(uint64_t)> callback) const
+    {
+        callback(commitIndex_);
+    }
+
+    void ServerImpl::processGetLogByteCount(std::function<void(uint64_t)> callback) const
+    {
+        const uint64_t count = log_.entries.size() * sizeof(data::LogEntry);
+        callback(count);
+    }
+
+    void ServerImpl::processGetLeaderID(
+        std::function<void(std::optional<std::string>)> callback) const
+    {
+        callback(lastLeaderID_);
+    }
+
+    void ServerImpl::postPersist(std::function<void(tl::expected<void, Error>)> callback) const
+    {
+        auto data = data::serialize(getPersistedState());
+        // We need the guard to keep the threads alive until the callback is invoked.
+        auto cb = [this, guard = work_, callback = std::move(callback)]
+        {
+            (void)guard;
+            // PersistenceHandler may run the callback on a different thread, so we post it back to
+            // the strand.
+            asio::post(strand_, [callback] { callback({}); });
+        };
+        persistenceHandler_->addRequest(impl::PersistenceRequest {.data = data, .callback = cb});
+    }
+
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)
     {
         auto server = std::make_shared<ServerImpl>(config.id,
@@ -511,7 +518,7 @@ namespace raft
                                                    config.leaderChangedCallback,
                                                    config.timeoutInterval,
                                                    config.heartbeatInterval);
-        if (auto result = server->init(config.peers); !result)
+        if (auto result = server->init(config.peers, config.threadCount); !result)
         {
             return tl::make_unexpected(result.error());
         }

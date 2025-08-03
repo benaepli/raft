@@ -30,7 +30,7 @@ namespace raft
         {
         };
 
-        /// The network interface is already running.
+        /// The network interface or server is already running.
         struct AlreadyRunning
         {
         };
@@ -44,6 +44,11 @@ namespace raft
         struct FailedToStart
         {
         };
+
+        /// Deserialization error.
+        struct Deserialization
+        {
+        };
     }  // namespace errors
 
     using Error = std::variant<errors::Timeout,
@@ -52,5 +57,6 @@ namespace raft
                                errors::NotLeader,
                                errors::AlreadyRunning,
                                errors::NotRunning,
-                               errors::FailedToStart>;
+                               errors::FailedToStart,
+                               errors::Deserialization>;
 }  // namespace raft
