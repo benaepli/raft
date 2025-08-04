@@ -74,6 +74,6 @@ message PersistedState {
   int64 term = 1;
   // The log entries.
   repeated LogEntry entries = 2;
-  // The commit index.
-  int64 commit_index = 3;
+  // The ID of the leader that the replica voted for in the current term, or null if it has not voted.
+  optional string voted_for = 3;
 }

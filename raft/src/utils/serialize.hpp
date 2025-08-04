@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "raft/client.hpp"
@@ -13,7 +14,7 @@ namespace raft::data  // namespace raft::data
     {
         uint64_t term;
         std::vector<LogEntry> entries;
-        uint64_t commitIndex;
+        std::optional<std::string> votedFor;
     };
 
     std::vector<std::byte> serialize(const PersistedState& state);

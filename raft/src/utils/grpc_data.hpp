@@ -126,7 +126,10 @@ namespace raft::data
         {
             *proto.add_entries() = toProto(entry);
         }
-        proto.set_commit_index(static_cast<int64_t>(state.commitIndex));
+        if (state.votedFor.has_value())
+        {
+            proto.set_voted_for(*state.votedFor);
+        }
         return proto;
     }
 
@@ -134,11 +137,14 @@ namespace raft::data
     {
         PersistedState state {
             .term = static_cast<uint64_t>(proto.term()),
-            .commitIndex = static_cast<uint64_t>(proto.commit_index()),
         };
         for (const auto& entry : proto.entries())
         {
             state.entries.push_back(fromProto(entry));
+        }
+        if (proto.has_voted_for())
+        {
+            state.votedFor = proto.voted_for();
         }
         return state;
     }

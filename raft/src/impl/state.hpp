@@ -21,7 +21,7 @@ namespace raft
         uint64_t nextIndex = 0;
         // The index of the highest log entry known to be replicated.
         uint64_t matchIndex = 0;
-        std::unique_ptr<asio::steady_timer> heartbeatTimer;
+        asio::steady_timer heartbeatTimer;  // Timer for sending heartbeats to the replica.
         // The maximum number of log entries to send in a single AppendEntries request.
         // TODO: this will be adjusted dynamically based on the replica's responses.
         uint64_t batchSize = 1;
@@ -59,7 +59,7 @@ struct fmt::formatter<raft::LeaderClientInfo>
             "{{nextIndex: {}, matchIndex: {}, heartbeatTimer: {}, batchSize: {}}}",
             info.nextIndex,
             info.matchIndex,
-            (info.heartbeatTimer ? "set" : "not set"),
+            info.heartbeatTimer.expiry(),
             info.batchSize);
     }
 };

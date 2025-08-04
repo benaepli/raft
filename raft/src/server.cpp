@@ -66,6 +66,23 @@ namespace raft
                 }
                 return entry->term;
             }
+
+            bool candidateIsEligible(uint64_t candidateLastIndex, uint64_t candidateLastTerm) const
+            {
+                auto term = lastTerm();
+                auto index = lastIndex();
+                // If the candidate's log is empty, then we can only elect it if our log is also
+                // empty.
+                if (candidateLastIndex == 0)
+                {
+                    return index == 0;
+                }
+                if (term != candidateLastTerm)
+                {
+                    return term < candidateLastTerm;
+                }
+                return index <= candidateLastIndex;
+            }
         };
 
         enum class Lifecycle : uint8_t
@@ -136,12 +153,14 @@ namespace raft
             }
 
             // Resets the timer and schedules it to run at the next timeout interval.
+            // Note that this function will be run again at the next timeout interval,
             void scheduleTimeout();
             // Resets the heartbeat timer and schedules it to run at the next heartbeat interval.
-            void scheduleHeartbeatTimeout();
+            // This function does not schedule itself to run again.
+            void scheduleHeartbeatTimeout(const std::string& id);
 
             void processTimeout();
-            void processHeartbeatTimeout();
+            void processHeartbeatTimeout(const std::string& id);
             void processAppend(const std::vector<std::byte>& data,
                                std::function<void(tl::expected<EntryInfo, Error>)> callback);
             void processInboundAppendEntries(
@@ -251,7 +270,9 @@ namespace raft
                 return tl::make_unexpected(state.error());
             }
             term_ = state->term;
-            commitIndex_ = state->commitIndex;
+            state_ = FollowerInfo {
+                .votedFor = state->votedFor,
+            };
             log_ = Log {.entries = std::move(state->entries), .baseIndex = 1};
         }
 
@@ -303,7 +324,13 @@ namespace raft
 
     data::PersistedState ServerImpl::getPersistedState() const
     {
-        return {.term = term_, .entries = log_.entries, .commitIndex = commitIndex_};
+        data::PersistedState state {.term = term_, .entries = log_.entries};
+        if (std::holds_alternative<FollowerInfo>(state_))
+        {
+            const auto& followerInfo = std::get<FollowerInfo>(state_);
+            state.votedFor = followerInfo.votedFor;
+        }
+        return state;
     }
 
     void ServerImpl::scheduleTimeout()
@@ -326,7 +353,40 @@ namespace raft
                     return;
                 }
                 asio::post(strand_, [this] { processTimeout(); });
-                scheduleTimeout();
+            });
+    }
+
+    void ServerImpl::scheduleHeartbeatTimeout(const std::string& id)
+    {
+        auto guard = work_;
+        if (shutdownCalled())
+        {
+            return;
+        }
+        auto it = clientIndices_.find(id);
+        if (it == clientIndices_.end())
+        {
+            spdlog::error("Unknown client ID: {}", id);
+            return;
+        }
+        auto& clientInfo = clients_[it->second];
+        if (!std::holds_alternative<LeaderInfo>(state_))
+        {
+            spdlog::error("Cannot schedule heartbeat timeout in non-leader state: {}", state_);
+            return;
+        }
+        auto& leaderInfo = std::get<LeaderInfo>(state_);
+        auto& leaderClientInfo = leaderInfo.clients[id];
+        auto& timer = leaderClientInfo.heartbeatTimer;
+        timer.expires_from_now(asio::chrono::milliseconds(heartbeatInterval_));
+        timer.async_wait(
+            [this, id](asio::error_code ec)
+            {
+                if (ec)
+                {
+                    return;
+                }
+                asio::post(strand_, [this, id] { processHeartbeatTimeout(id); });
             });
     }
 
@@ -351,15 +411,47 @@ namespace raft
         const data::AppendEntriesRequest& request,
         std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
     {
+        auto guard = work_;
+        if (shutdownCalled())
+        {
+            callback(tl::make_unexpected(errors::NotRunning {}));
+            return;
+        }
         asio::post(strand_,
                    [this, request, callback = std::move(callback)]
-                   { processInboundAppendEntries(request, callback); });
+                   {
+                       processInboundAppendEntries(
+                           request,
+                           [this, guard = work_, callback](
+                               tl::expected<data::AppendEntriesResponse, Error> response)
+                           {
+                               postPersist(
+                                   [this, callback, response = std::move(response)](
+                                       tl::expected<void, Error> result)
+                                   {
+                                       if (!result)
+                                       {
+                                           spdlog::error(
+                                               "failed to persist state after AppendEntries: {}",
+                                               result.error());
+                                           callback(tl::make_unexpected(result.error()));
+                                           return;
+                                       }
+                                       callback(response);
+                                   });
+                           });
+                   });
     }
 
     void ServerImpl::handleRequestVote(
         const data::RequestVoteRequest& request,
         std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
     {
+        if (shutdownCalled())
+        {
+            callback(tl::make_unexpected(errors::NotRunning {}));
+            return;
+        }
         asio::post(strand_,
                    [this, request, callback = std::move(callback)]
                    { processInboundRequestVote(request, callback); });
@@ -484,18 +576,27 @@ namespace raft
             .lastLogTerm = log_.lastTerm(),
         };
 
-        for (auto& client : clients_)
-        {
-            postRequestVote(client,
-                            request,
-                            [this](tl::expected<data::RequestVoteResponse, Error> response)
-                            { onRequestVoteResponse(std::move(response)); });
-        }
+        postPersist(
+            [this, request](tl::expected<void, Error> result)
+            {
+                if (!result)
+                {
+                    spdlog::error("failed to persist state during timeout: {}", result.error());
+                    return;
+                }
+                for (auto& client : clients_)
+                {
+                    postRequestVote(client,
+                                    request,
+                                    [this](tl::expected<data::RequestVoteResponse, Error> response)
+                                    { onRequestVoteResponse(std::move(response)); });
+                }
+            });
     }
 
-    void ServerImpl::processHeartbeatTimeout()
+    void ServerImpl::processHeartbeatTimeout(const std::string& id)
     {
-        // TODO: Implement heartbeat timeout processing
+        (void)id;
     }
 
     void ServerImpl::processInboundAppendEntries(
@@ -511,9 +612,42 @@ namespace raft
         const data::RequestVoteRequest& request,
         std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
     {
-        // TODO: Implement RequestVote request handling
-        (void)request;
-        (void)callback;
+        if (request.term < term_)
+        {
+            callback(data::RequestVoteResponse {
+                .term = term_,
+                .voteGranted = false,
+            });
+            return;
+        }
+        if (request.term > term_)
+        {
+            term_ = request.term;
+            becomeFollower();
+        }
+
+        if (!std::holds_alternative<FollowerInfo>(state_))
+        {
+            callback(data::RequestVoteResponse {
+                .term = term_,
+                .voteGranted = false,
+            });
+            return;
+        }
+        auto& followerInfo = std::get<FollowerInfo>(state_);
+        if (followerInfo.votedFor.has_value() && *followerInfo.votedFor != request.candidateID)
+        {
+            callback(data::RequestVoteResponse {
+                .term = term_,
+                .voteGranted = false,
+            });
+            return;
+        }
+        callback(data::RequestVoteResponse {
+            .term = term_,
+            .voteGranted = log_.candidateIsEligible(request.lastLogIndex, request.lastLogTerm),
+        });
+        followerInfo.votedFor = request.candidateID;
     }
 
     void ServerImpl::processGetTerm(std::function<void(uint64_t)> callback) const
@@ -606,6 +740,30 @@ namespace raft
         }
         // We have enough votes to become the leader.
         becomeLeader();
+    }
+
+    void ServerImpl::becomeFollower()
+    {
+        state_ = FollowerInfo {};
+        lastLeaderID_.reset();
+        scheduleTimeout();
+    }
+
+    void ServerImpl::becomeLeader()
+    {
+        state_ = LeaderInfo {};
+        auto& leaderInfo = std::get<LeaderInfo>(state_);
+        leaderInfo.clients.reserve(clients_.size());
+        for (const auto& client : clients_)
+        {
+            leaderInfo.clients[client.id] = LeaderClientInfo {
+                .nextIndex = log_.lastIndex() + 1,
+                .matchIndex = 0,
+                .heartbeatTimer = asio::steady_timer(io_),
+                .batchSize = 1,  // Default batch size.
+            };
+            scheduleHeartbeatTimeout(client.id);
+        }
     }
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)
