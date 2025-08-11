@@ -59,7 +59,7 @@ struct fmt::formatter<raft::LeaderClientInfo>
             "{{nextIndex: {}, matchIndex: {}, heartbeatTimer: {}, batchSize: {}}}",
             info.nextIndex,
             info.matchIndex,
-            info.heartbeatTimer.expiry(),
+            info.heartbeatTimer.expiry().time_since_epoch().count(),
             info.batchSize);
     }
 };

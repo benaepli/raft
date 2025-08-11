@@ -156,7 +156,6 @@ namespace raft
             // Note that this function will be run again at the next timeout interval,
             void scheduleTimeout();
             // Resets the heartbeat timer and schedules it to run at the next heartbeat interval.
-            // This function does not schedule itself to run again.
             void scheduleHeartbeatTimeout(const std::string& id);
 
             void processTimeout();
@@ -211,7 +210,6 @@ namespace raft
             std::shared_ptr<Persister> persister_;
             std::optional<CommitCallback> commitCallback_;
             std::optional<LeaderChangedCallback> leaderChangedCallback_;
-            std::optional<std::string> leaderAddress_;
             uint64_t term_ = 0;
             uint64_t commitIndex_ = 0;
             // The log starts at index 1.
@@ -363,20 +361,18 @@ namespace raft
         {
             return;
         }
-        auto it = clientIndices_.find(id);
-        if (it == clientIndices_.end())
+        if (!std::holds_alternative<LeaderInfo>(state_))
+        {
+            return;
+        }
+        auto& leaderInfo = std::get<LeaderInfo>(state_);
+        auto it = leaderInfo.clients.find(id);
+        if (it == leaderInfo.clients.end())
         {
             spdlog::error("Unknown client ID: {}", id);
             return;
         }
-        auto& clientInfo = clients_[it->second];
-        if (!std::holds_alternative<LeaderInfo>(state_))
-        {
-            spdlog::error("Cannot schedule heartbeat timeout in non-leader state: {}", state_);
-            return;
-        }
-        auto& leaderInfo = std::get<LeaderInfo>(state_);
-        auto& leaderClientInfo = leaderInfo.clients[id];
+        auto& leaderClientInfo = it->second;
         auto& timer = leaderClientInfo.heartbeatTimer;
         timer.expires_from_now(asio::chrono::milliseconds(heartbeatInterval_));
         timer.async_wait(
@@ -400,6 +396,7 @@ namespace raft
         std::call_once(startFlag_,
                        [this]
                        {
+                           lifecycle_ = Lifecycle::Running;
                            persistenceHandler_ = std::make_unique<impl::PersistenceHandler>(
                                persister_, MAX_PERSISTENCE_INTERVAL, MAX_LOG_ENTRIES);
                            scheduleTimeout();
@@ -417,13 +414,47 @@ namespace raft
             callback(tl::make_unexpected(errors::NotRunning {}));
             return;
         }
+        asio::post(
+            strand_,
+            [this, request, callback = std::move(callback)]
+            {
+                processInboundAppendEntries(
+                    request,
+                    [this, callback](tl::expected<data::AppendEntriesResponse, Error> response)
+                    {
+                        postPersist(
+                            [this, callback, response = std::move(response)](
+                                tl::expected<void, Error> result)
+                            {
+                                if (!result)
+                                {
+                                    spdlog::error("failed to persist state after AppendEntries: {}",
+                                                  result.error());
+                                    callback(tl::make_unexpected(result.error()));
+                                    return;
+                                }
+                                callback(response);
+                            });
+                    });
+            });
+    }
+
+    void ServerImpl::handleRequestVote(
+        const data::RequestVoteRequest& request,
+        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
+    {
+        auto guard = work_;
+        if (shutdownCalled())
+        {
+            callback(tl::make_unexpected(errors::NotRunning {}));
+            return;
+        }
         asio::post(strand_,
                    [this, request, callback = std::move(callback)]
                    {
-                       processInboundAppendEntries(
+                       processInboundRequestVote(
                            request,
-                           [this, guard = work_, callback](
-                               tl::expected<data::AppendEntriesResponse, Error> response)
+                           [this, callback](tl::expected<data::RequestVoteResponse, Error> response)
                            {
                                postPersist(
                                    [this, callback, response = std::move(response)](
@@ -432,7 +463,7 @@ namespace raft
                                        if (!result)
                                        {
                                            spdlog::error(
-                                               "failed to persist state after AppendEntries: {}",
+                                               "failed to persist state after RequestVote: {}",
                                                result.error());
                                            callback(tl::make_unexpected(result.error()));
                                            return;
@@ -441,20 +472,6 @@ namespace raft
                                    });
                            });
                    });
-    }
-
-    void ServerImpl::handleRequestVote(
-        const data::RequestVoteRequest& request,
-        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
-    {
-        if (shutdownCalled())
-        {
-            callback(tl::make_unexpected(errors::NotRunning {}));
-            return;
-        }
-        asio::post(strand_,
-                   [this, request, callback = std::move(callback)]
-                   { processInboundRequestVote(request, callback); });
     }
 
     tl::expected<uint64_t, Error> ServerImpl::getTerm() const
@@ -596,16 +613,75 @@ namespace raft
 
     void ServerImpl::processHeartbeatTimeout(const std::string& id)
     {
-        (void)id;
+        if (!std::holds_alternative<LeaderInfo>(state_))
+        {
+            return;
+        }
+        auto& leaderInfo = std::get<LeaderInfo>(state_);
+        auto it = leaderInfo.clients.find(id);
+        if (it == leaderInfo.clients.end())
+        {
+            spdlog::error("Unknown client ID: {}", id);
+            return;
+        }
+        auto& leaderClientInfo = it->second;
+        scheduleHeartbeatTimeout(id_);
+        uint64_t nextIndex = leaderClientInfo.nextIndex;
+        uint64_t lastIndex = std::min(nextIndex + leaderClientInfo.batchSize - 1, log_.lastIndex());
+        std::vector<data::LogEntry> entries;
+        for (uint64_t i = nextIndex; i <= lastIndex; i++)
+        {
+            entries.push_back(*log_.get(i));
+        }
+        auto* prevLogEntry = log_.get(nextIndex - 1);
+        auto prevLogTerm = prevLogEntry ? prevLogEntry->term : 0;
+
+        data::AppendEntriesRequest appendRequest {
+            .term = term_,
+            .leaderID = id_,
+            .prevLogIndex = nextIndex - 1,
+            .prevLogTerm = prevLogTerm,
+            .entries = entries,
+            .leaderCommit = commitIndex_,
+        };
+        postAppendEntries(id,
+                          appendRequest,
+                          [this, id](tl::expected<data::AppendEntriesResponse, Error> response)
+                          { onAppendEntriesResponse(id, std::move(response)); });
     }
 
     void ServerImpl::processInboundAppendEntries(
         const data::AppendEntriesRequest& request,
         std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
     {
-        // TODO: Implement AppendEntries request handling
-        (void)request;
-        (void)callback;
+        if (request.term < term_)
+        {
+            callback(data::AppendEntriesResponse {
+                .term = term_,
+                .success = false,
+            });
+            return;
+        }
+
+        if (request.term > term_ || !std::holds_alternative<FollowerInfo>(state_))
+        {
+            term_ = request.term;
+            bool lostLeadership = std::holds_alternative<LeaderInfo>(state_);
+            becomeFollower();
+            auto previousLeaderID = lastLeaderID_;
+            lastLeaderID_ = request.leaderID;
+            if (leaderChangedCallback_ && previousLeaderID != lastLeaderID_)
+            {
+                (*leaderChangedCallback_)(lastLeaderID_, false, lostLeadership);
+            }
+        }
+        else
+        {
+            scheduleTimeout();
+        }
+        auto& followerInfo = std::get<FollowerInfo>(state_);
+        // TODO: Update the log.
+        (void)followerInfo;
     }
 
     void ServerImpl::processInboundRequestVote(
@@ -745,7 +821,6 @@ namespace raft
     void ServerImpl::becomeFollower()
     {
         state_ = FollowerInfo {};
-        lastLeaderID_.reset();
         scheduleTimeout();
     }
 
@@ -756,12 +831,13 @@ namespace raft
         leaderInfo.clients.reserve(clients_.size());
         for (const auto& client : clients_)
         {
-            leaderInfo.clients[client.id] = LeaderClientInfo {
-                .nextIndex = log_.lastIndex() + 1,
-                .matchIndex = 0,
-                .heartbeatTimer = asio::steady_timer(io_),
-                .batchSize = 1,  // Default batch size.
-            };
+            leaderInfo.clients.emplace(std::pair {client.id,
+                                                  LeaderClientInfo {
+                                                      .nextIndex = log_.lastIndex() + 1,
+                                                      .matchIndex = 0,
+                                                      .heartbeatTimer = asio::steady_timer(io_),
+                                                      .batchSize = 1,  // Default batch size.
+                                                  }});
             scheduleHeartbeatTimeout(client.id);
         }
     }
