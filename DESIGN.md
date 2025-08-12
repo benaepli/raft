@@ -271,11 +271,16 @@ discarded due to the pipelining of heartbeats in-flight. However, latency increa
 
 #### Batch Size Adjustment
 
-A dynamic batch size, loosely inspired by TCP congestion control, will be used:
+A dynamic batch size, loosely inspired by TCP congestion control, will be used. We maintain a variable `threshold` that
+is initialized to a large (infinite) value.
 
 - Start with a batch size of 1.
-- If the AppendEntries request succeeds, double batch size up to a configured maximum (e.g. 2000 MB).
-- On failure (e.g. a log inconsistency), immediately reset the batch size to 1.
+- If an AppendEntries request with the current maximum batch size succeeds:
+    - If `batchSize < threshold`, double the batch size.
+    - Otherwise, increment the batch size by a configurable amount.
+- On log inconsistency, set `threshold = max(1, batchSize / 2)` and immediately reset the batch
+  size to 1.
+- On network timeout, halve both the batch size and the threshold.
 
 ### Persistence Strategy
 
@@ -305,7 +310,8 @@ This function must:
         - Posts another event on the strand that sends the result back to the GetTerm() thread
 - Wait for the strand to surface the result
 
-- If we simply close off the ability to send new events into the strand, we could end up in a situation where:
+If we simply close off the ability to send new events into the strand, we could end up in a situation where:
+
 - The final event that sends the result back is never queued.
 - Therefore, GetTerm() waits indefinitely.
 

@@ -58,7 +58,7 @@ namespace raft
     struct ServerCreateConfig
     {
         std::string id;  ///< The ID of the server.
-        std::unique_ptr<ClientFactory> clientFactory;  ///< The client factory to use.
+        std::shared_ptr<ClientFactory> clientFactory;  ///< The client factory to use.
         std::vector<Peer> peers;  ///< The list of other addresses of Raft servers in the cluster.
         std::shared_ptr<Persister> persister;  ///< The persister to use.
         std::optional<CommitCallback> commitCallback;  ///< The commit callback to use.
@@ -140,7 +140,7 @@ namespace raft
 
     /// Creates a new Raft server with the given configuration.
     /// Note that on creation, the server will attempt to read its state from the persister.
-    /// The client factory will be moved into the server.
+    /// The client factory will be shared with the server.
     /// @param config The configuration for the server.
     /// @return A shared pointer to the server or an error.
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config);

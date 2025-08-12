@@ -53,6 +53,18 @@ namespace raft::errors::detail
 }  // namespace raft::errors::detail
 
 template<>
+struct fmt::formatter<raft::errors::Unknown>
+{
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const raft::errors::Unknown& err, FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "unknown error: {}", err.message);
+    }
+};
+
+template<>
 struct fmt::formatter<raft::errors::InvalidArgument>
 {
     // No format specifiers needed, so the parse function is simple.

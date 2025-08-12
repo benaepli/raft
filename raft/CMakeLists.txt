@@ -9,12 +9,15 @@ add_library(raft
     ../include/raft/client.hpp
     ../include/raft/errors.hpp
     ../include/raft/fmt/errors.hpp
+    ../include/raft/inmemory/manager.hpp
     ../include/raft/network.hpp
     ../include/raft/persister.hpp
     ../include/raft/server.hpp
     src/client.cpp
     src/common/mpsc_queue.hpp
     src/impl/persistence.hpp
+    src/impl/state.hpp
+    src/inmemory/manager.cpp
     src/network.cpp
     src/raft.cpp
     src/server.cpp

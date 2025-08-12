@@ -6,6 +6,15 @@
 
 namespace raft::errors
 {
+    // Helper for std::visit with multiple lambdas
+    template<class... Ts>
+    struct overloaded : Ts...
+    {
+        using Ts::operator()...;
+    };
+    template<class... Ts>
+    overloaded(Ts...) -> overloaded<Ts...>;
+
     inline Error fromGrpcStatus(const grpc::Status& status)
     {
         switch (status.error_code())
@@ -24,7 +33,7 @@ namespace raft::errors
                 return InvalidArgument {.message = status.error_message()};
 
             default:
-                return InvalidArgument {.message = status.error_message()};
+                return Unknown {.message = status.error_message()};
         }
     }
 
@@ -32,43 +41,26 @@ namespace raft::errors
     inline grpc::Status toGrpcStatus(const Error& error)
     {
         return std::visit(
-            [](const auto& e) -> grpc::Status
-            {
-                using T = std::decay_t<decltype(e)>;
-
-                if constexpr (std::is_same_v<T, Timeout>)
-                {
-                    return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Timeout occurred");
-                }
-                else if constexpr (std::is_same_v<T, Unimplemented>)
-                {
-                    return grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Not implemented");
-                }
-                else if constexpr (std::is_same_v<T, InvalidArgument>)
-                {
-                    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, e.message);
-                }
-                else if constexpr (std::is_same_v<T, NotLeader>)
-                {
-                    return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Not leader");
-                }
-                else if constexpr (std::is_same_v<T, AlreadyRunning>)
-                {
-                    return grpc::Status(grpc::StatusCode::ALREADY_EXISTS, "Already running");
-                }
-                else if constexpr (std::is_same_v<T, NotRunning>)
-                {
-                    return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Not running");
-                }
-                else if constexpr (std::is_same_v<T, FailedToStart>)
-                {
-                    return grpc::Status(grpc::StatusCode::INTERNAL, "Failed to start");
-                }
-                else
-                {
-                    return grpc::Status(grpc::StatusCode::UNKNOWN, "Unknown error");
-                }
-            },
+            overloaded {
+                [](const Unknown& e) { return grpc::Status(grpc::StatusCode::UNKNOWN, e.message); },
+                [](const Timeout&)
+                { return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Timeout occurred"); },
+                [](const Unimplemented&)
+                { return grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Not implemented"); },
+                [](const InvalidArgument& e)
+                { return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, e.message); },
+                [](const NotLeader&)
+                { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Not leader"); },
+                [](const AlreadyRunning&)
+                { return grpc::Status(grpc::StatusCode::ALREADY_EXISTS, "Already running"); },
+                [](const NotRunning&)
+                { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Not running"); },
+                [](const FailedToStart&)
+                { return grpc::Status(grpc::StatusCode::INTERNAL, "Failed to start"); },
+                [](const Deserialization&)
+                { return grpc::Status(grpc::StatusCode::DATA_LOSS, "Deserialization failed"); },
+                [](const UnknownLeader&)
+                { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Unknown leader"); }},
             error);
     }
 }  // namespace raft::errors

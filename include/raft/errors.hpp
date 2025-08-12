@@ -8,6 +8,12 @@ namespace raft
 {
     namespace errors
     {
+        /// An unknown error.
+        struct Unknown
+        {
+            std::string message;  ///< The error message.
+        };
+
         /// A timeout has occurred.
         struct Timeout
         {
@@ -49,13 +55,14 @@ namespace raft
         {
         };
 
-        // The leader is unknown or does not exist.
+        /// The leader is unknown or does not exist.
         struct UnknownLeader
         {
         };
     }  // namespace errors
 
-    using Error = std::variant<errors::Timeout,
+    using Error = std::variant<errors::Unknown,
+                               errors::Timeout,
                                errors::Unimplemented,
                                errors::InvalidArgument,
                                errors::NotLeader,

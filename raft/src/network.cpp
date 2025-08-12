@@ -22,7 +22,6 @@ namespace raft
             {
             }
 
-
             grpc::ServerUnaryReactor* AppendEntries(
                 grpc::CallbackServerContext* context,
                 const raft_protos::AppendEntriesRequest* request,
@@ -85,7 +84,7 @@ namespace raft
 
             tl::expected<std::string, Error> start(const std::string& address) override
             {
-                if (isRunning())
+                if (running_)
                 {
                     return tl::make_unexpected(errors::AlreadyRunning {});
                 }
@@ -102,6 +101,7 @@ namespace raft
                     return tl::make_unexpected(errors::FailedToStart {});
                 }
 
+                running_ = true;
                 return address.find(":0") != std::string::npos
                     ? address.substr(0, address.find(":0")) + ":" + std::to_string(port)
                     : address;
@@ -109,13 +109,14 @@ namespace raft
 
             tl::expected<void, Error> stop() override
             {
-                if (!isRunning())
+                if (running_)
                 {
                     return tl::make_unexpected(errors::NotRunning {});
                 }
 
                 server_->Shutdown();
                 server_.reset();
+                running_ = false;
 
                 return {};
             }
@@ -127,6 +128,7 @@ namespace raft
 
             GrpcServiceImpl service_;
             std::unique_ptr<grpc::Server> server_;
+            bool running_ = false;
         };
     }  // namespace
 

@@ -111,14 +111,22 @@ namespace raft
     /// @return A unique pointer to the client or an error.
     tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string& address);
 
+    /// Abstract factory interface for creating Raft clients.
+    /// Implementations of this interface provide a way to create Client instances
+    /// for connecting to Raft servers at specific addresses.
     class ClientFactory
     {
       public:
         virtual ~ClientFactory() = default;
 
+        /// Creates a new Raft client that connects to the specified address.
+        /// @param address The address to connect to in "host:port" format.
+        /// @return A unique pointer to the client or an error if creation fails.
         virtual tl::expected<std::unique_ptr<Client>, Error> createClient(
             const std::string& address) = 0;
     };
 
-    std::unique_ptr<ClientFactory> createClientFactory();
+    /// Creates a default ClientFactory implementation that uses gRPC for communication.
+    /// @return A shared pointer to a ClientFactory instance.
+    std::shared_ptr<ClientFactory> createClientFactory();
 }  // namespace raft

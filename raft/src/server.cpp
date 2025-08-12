@@ -105,7 +105,7 @@ namespace raft
         {
           public:
             ServerImpl(std::string id,
-                       std::unique_ptr<ClientFactory> clientFactory,
+                       std::shared_ptr<ClientFactory> clientFactory,
                        std::shared_ptr<Persister> persister,
                        std::optional<CommitCallback> commitCallback,
                        std::optional<LeaderChangedCallback> leaderChangedCallback,
@@ -181,8 +181,14 @@ namespace raft
                 const ClientInfo& client,
                 const data::RequestVoteRequest& request,
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
+            void postAppendEntries(
+                const std::string& id,
+                const data::AppendEntriesRequest& request,
+                std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback);
 
             void onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response);
+            void onAppendEntriesResponse(const std::string& id,
+                                         tl::expected<data::AppendEntriesResponse, Error> response);
 
             // becomeFollower transitions the server to the Follower state.
             void becomeFollower();
@@ -201,7 +207,7 @@ namespace raft
 
             // The ID. This is a constant throughout the lifetime of the server.
             std::string id_;
-            std::unique_ptr<ClientFactory> clientFactory_;
+            std::shared_ptr<ClientFactory> clientFactory_;
             // Clients for the other replicas.
             std::vector<ClientInfo> clients_;
             // A map from server ID to the index of the client in `clients_`.
@@ -231,7 +237,7 @@ namespace raft
     }  // namespace
 
     ServerImpl::ServerImpl(std::string id,
-                           std::unique_ptr<ClientFactory> clientFactory,
+                           std::shared_ptr<ClientFactory> clientFactory,
                            std::shared_ptr<Persister> persister,
                            std::optional<CommitCallback> commitCallback,
                            std::optional<LeaderChangedCallback> leaderChangedCallback,
@@ -239,7 +245,7 @@ namespace raft
                            uint64_t heartbeatInterval)
         : work_(io_.get_executor())
         , id_(std::move(id))
-        , clientFactory_(std::move(clientFactory))
+        , clientFactory_(clientFactory)
         , persister_(std::move(persister))
         , commitCallback_(std::move(commitCallback))
         , leaderChangedCallback_(std::move(leaderChangedCallback))
@@ -777,6 +783,28 @@ namespace raft
                                    });
     }
 
+    void ServerImpl::postAppendEntries(
+        const std::string& id,
+        const data::AppendEntriesRequest& request,
+        std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
+    {
+        auto it = clientIndices_.find(id);
+        if (it == clientIndices_.end())
+        {
+            spdlog::error("Unknown client ID: {}", id);
+            return;
+        }
+        auto& client = clients_[it->second];
+        client.client->appendEntries(request,
+                                     requestConfig_,
+                                     [this, guard = work_, callback = std::move(callback)](
+                                         tl::expected<data::AppendEntriesResponse, Error> response)
+                                     {
+                                         (void)guard;
+                                         callback(std::move(response));
+                                     });
+    }
+
     void ServerImpl::onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response)
     {
         if (!response)
@@ -818,6 +846,12 @@ namespace raft
         becomeLeader();
     }
 
+    void ServerImpl::onAppendEntriesResponse(
+        const std::string& id, tl::expected<data::AppendEntriesResponse, Error> response)
+    {
+        // TODO: Implement AppendEntries response handling.
+    }
+
     void ServerImpl::becomeFollower()
     {
         state_ = FollowerInfo {};
@@ -845,7 +879,7 @@ namespace raft
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)
     {
         auto server = std::make_shared<ServerImpl>(config.id,
-                                                   std::move(config.clientFactory),
+                                                   config.clientFactory,
                                                    config.persister,
                                                    config.commitCallback,
                                                    config.leaderChangedCallback,

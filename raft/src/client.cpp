@@ -142,4 +142,9 @@ namespace raft
     {
         return GrpcClientFactory().createClient(address);
     }
+
+    std::shared_ptr<ClientFactory> createClientFactory()
+    {
+        return std::make_shared<GrpcClientFactory>();
+    }
 }  // namespace raft
