@@ -2,6 +2,33 @@
 
 This document outlines the high-level design and implementation strategy for my Raft library.
 
+## Table of Contents
+
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Overview](#overview)
+    - [Core Interface](#core-interface)
+    - [Network Interface](#network-interface)
+    - [Planned Features](#planned-features)
+        - [Snapshots](#snapshots)
+    - [High-Level Wrapper](#high-level-wrapper)
+        - [1. Waiting for Appends](#1-waiting-for-appends)
+        - [2. Deduplication](#2-deduplication)
+        - [3. Automatic Snapshots](#3-automatic-snapshots)
+- [Server Implementation](#server-implementation)
+    - [Concurrency Model](#concurrency-model)
+        - [Considered Approaches](#considered-approaches)
+        - [Selected Approach](#selected-approach)
+        - [gRPC Integration](#grpc-integration)
+    - [AppendEntries Strategy](#appendentries-strategy)
+        - [Example](#example)
+        - [Batch Size Adjustment](#batch-size-adjustment)
+    - [Persistence Strategy](#persistence-strategy)
+    - [Shutdown Handling](#shutdown-handling)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## Overview
 
 Instead of exposing a separate client-facing service, the core Raft logic is managed through a C++ server interface.
