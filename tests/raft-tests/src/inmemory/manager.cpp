@@ -100,7 +100,7 @@ TEST(InMemoryManagerTest, NetworkStartStopAndClientErrorHandling)
 
     EXPECT_TRUE(std::holds_alternative<raft::errors::Unknown>(result2.error()));
     auto unknownError = std::get<raft::errors::Unknown>(result2.error());
-    EXPECT_EQ(unknownError.message, "network not found");
+    EXPECT_EQ(unknownError.message, "network not found: test-server-address");
 }
 
 TEST(InMemoryManagerTest, SingleClientNetworkAppendEntries)

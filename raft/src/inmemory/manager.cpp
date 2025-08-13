@@ -7,6 +7,8 @@
 
 #include "raft/inmemory/manager.hpp"
 
+#include <fmt/format.h>
+
 namespace raft::inmemory
 {
     namespace
@@ -107,7 +109,7 @@ namespace raft::inmemory
 
           private:
             std::mutex mutex_;
-            std::unordered_map<std::string, std::weak_ptr<ServiceHandler>> networks_;
+            std::unordered_map<std::string, std::weak_ptr<ServiceHandler>> handlers_;
             std::unordered_set<std::string> detachedNetworks_;
         };
 
@@ -164,18 +166,18 @@ namespace raft::inmemory
             const std::string& address, const std::shared_ptr<ServiceHandler>& handler)
         {
             std::lock_guard lock {mutex_};
-            if (networks_.contains(address))
+            if (handlers_.contains(address))
             {
                 return tl::make_unexpected(errors::FailedToStart {});
             }
-            networks_.insert({address, handler});
+            handlers_.insert({address, handler});
             return {};
         }
 
         void ManagerImpl::unregisterNetwork(const std::string& address)
         {
             std::lock_guard lock {mutex_};
-            networks_.erase(address);
+            handlers_.erase(address);
             detachedNetworks_.erase(address);
         }
 
@@ -192,11 +194,12 @@ namespace raft::inmemory
                 callback(tl::make_unexpected(errors::Unknown {.message = "network detached"}));
                 return;
             }
-            auto handler = networks_[address].lock();
+            auto handler = handlers_[address].lock();
             lock.unlock();
             if (!handler)
             {
-                callback(tl::make_unexpected(errors::Unknown {.message = "network not found"}));
+                callback(tl::make_unexpected(
+                    errors::Unknown {.message = fmt::format("network not found: {}", address)}));
                 return;
             }
             handler->handleAppendEntries(request, std::move(callback));
@@ -215,11 +218,12 @@ namespace raft::inmemory
                 callback(tl::make_unexpected(errors::Unknown {.message = "network detached"}));
                 return;
             }
-            auto handler = networks_[address].lock();
+            auto handler = handlers_[address].lock();
             lock.unlock();
             if (!handler)
             {
-                callback(tl::make_unexpected(errors::Unknown {.message = "network not found"}));
+                callback(tl::make_unexpected(
+                    errors::Unknown {.message = fmt::format("network not found: {}", address)}));
                 return;
             }
             handler->handleRequestVote(request, std::move(callback));
@@ -228,7 +232,7 @@ namespace raft::inmemory
         tl::expected<void, Error> ManagerImpl::detachNetwork(const std::string& address)
         {
             std::lock_guard lock {mutex_};
-            if (!networks_.contains(address))
+            if (!handlers_.contains(address))
             {
                 return tl::make_unexpected(errors::NonexistentNetwork {});
             }
@@ -239,7 +243,7 @@ namespace raft::inmemory
         tl::expected<void, Error> ManagerImpl::attachNetwork(const std::string& address)
         {
             std::lock_guard lock {mutex_};
-            if (!networks_.contains(address))
+            if (!handlers_.contains(address))
             {
                 return tl::make_unexpected(errors::NonexistentNetwork {});
             }

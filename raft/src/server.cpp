@@ -285,6 +285,10 @@ namespace raft
             };
             log_ = Log {.entries = std::move(state->entries), .baseIndex = 1};
         }
+        else
+        {
+            log_ = Log {.baseIndex = 1};
+        }
 
         clients_.clear();
         clients_.reserve(peers.size());
@@ -582,22 +586,23 @@ namespace raft
         }
         std::promise<tl::expected<std::optional<std::string>, Error>> promise;
         auto future = promise.get_future();
-        asio::post(strand_,
-                   [this, &promise]
-                   {
-                       postPersist(
-                           [this, &promise, lastLeaderID = lastLeaderID_](tl::expected<void, Error> result)
-                           {
-                               if (!result)
-                               {
-                                   spdlog::error("failed to persist state before getLeaderID: {}",
-                                                 result.error());
-                                   promise.set_value(tl::make_unexpected(result.error()));
-                                   return;
-                               }
-                               promise.set_value(lastLeaderID);
-                           });
-                   });
+        asio::post(
+            strand_,
+            [this, &promise]
+            {
+                postPersist(
+                    [this, &promise, lastLeaderID = lastLeaderID_](tl::expected<void, Error> result)
+                    {
+                        if (!result)
+                        {
+                            spdlog::error("failed to persist state before getLeaderID: {}",
+                                          result.error());
+                            promise.set_value(tl::make_unexpected(result.error()));
+                            return;
+                        }
+                        promise.set_value(lastLeaderID);
+                    });
+            });
         auto result = future.get();
         if (!result)
         {
@@ -725,7 +730,7 @@ namespace raft
             return;
         }
         auto& leaderClientInfo = it->second;
-        scheduleHeartbeatTimeout(id_);
+        scheduleHeartbeatTimeout(id);
         uint64_t nextIndex = leaderClientInfo.nextIndex;
         uint64_t lastIndex = std::min(nextIndex + leaderClientInfo.batchSize - 1, log_.lastIndex());
         std::vector<data::LogEntry> entries;
