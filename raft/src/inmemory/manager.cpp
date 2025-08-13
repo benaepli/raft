@@ -16,7 +16,7 @@ namespace raft::inmemory
         class ManagerImpl;
 
         // The network registers its handler with the manager and unregisters when destroyed.
-        class Network : public raft::Network
+        class Network final : public raft::Network
         {
           public:
             Network(std::shared_ptr<ServiceHandler> handler, std::shared_ptr<ManagerImpl> manager)
@@ -45,9 +45,12 @@ namespace raft::inmemory
         class Client final : public raft::Client
         {
           public:
-            Client(std::shared_ptr<ManagerImpl> manager, std::string address)
+            Client(std::shared_ptr<ManagerImpl> manager,
+                   std::string clientAddress,
+                   std::string externalAddress)
                 : manager_(std::move(manager))
-                , address_(std::move(address))
+                , clientAddress_(std::move(clientAddress))
+                , externalAddress_(std::move(externalAddress))
             {
             }
 
@@ -65,6 +68,27 @@ namespace raft::inmemory
 
           private:
             std::shared_ptr<ManagerImpl> manager_;
+            std::string clientAddress_;
+            std::string externalAddress_;
+        };
+
+        class ClientFactory final : public raft::ClientFactory
+        {
+          public:
+            ClientFactory(std::shared_ptr<ManagerImpl> manager, std::string address)
+                : manager_(std::move(manager))
+                , address_(std::move(address))
+            {
+            }
+
+            tl::expected<std::unique_ptr<raft::Client>, Error> createClient(
+                const std::string& externalAddress) override
+            {
+                return std::make_unique<Client>(manager_, address_, externalAddress);
+            }
+
+          private:
+            std::shared_ptr<ManagerImpl> manager_;
             std::string address_;
         };
 
@@ -76,16 +100,16 @@ namespace raft::inmemory
             ManagerImpl() = default;
             ~ManagerImpl() override = default;
 
-            tl::expected<std::unique_ptr<raft::Client>, Error> createClient(
-                const std::string& address) override
-            {
-                return std::make_unique<Client>(shared_from_this(), address);
-            }
-
-            tl::expected<std::shared_ptr<raft::Network>, raft::Error> createNetwork(
+            tl::expected<std::shared_ptr<raft::Network>, Error> createNetwork(
                 const NetworkCreateConfig& config) override
             {
                 return std::make_shared<Network>(config.handler, shared_from_this());
+            }
+
+            tl::expected<std::shared_ptr<raft::ClientFactory>, Error> createClientFactory(
+                const std::string& address) override
+            {
+                return std::make_shared<ClientFactory>(shared_from_this(), address);
             }
 
             tl::expected<void, Error> registerNetwork(
@@ -93,13 +117,15 @@ namespace raft::inmemory
             void unregisterNetwork(const std::string& address);
 
             void callAppendEntries(
-                const std::string& address,
+                const std::string& clientAddress,
+                const std::string& externalAddress,
                 const data::AppendEntriesRequest& request,
                 RequestConfig config,
                 std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback);
 
             void callRequestVote(
-                const std::string& address,
+                const std::string& clientAddress,
+                const std::string& externalAddress,
                 const data::RequestVoteRequest& request,
                 RequestConfig config,
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
@@ -151,7 +177,8 @@ namespace raft::inmemory
             RequestConfig config,
             std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
         {
-            manager_->callAppendEntries(address_, request, config, std::move(callback));
+            manager_->callAppendEntries(
+                clientAddress_, externalAddress_, request, config, std::move(callback));
         }
 
         void Client::requestVote(
@@ -159,7 +186,8 @@ namespace raft::inmemory
             RequestConfig config,
             std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
         {
-            manager_->callRequestVote(address_, request, config, std::move(callback));
+            manager_->callRequestVote(
+                clientAddress_, externalAddress_, request, config, std::move(callback));
         }
 
         tl::expected<void, Error> ManagerImpl::registerNetwork(
@@ -182,48 +210,52 @@ namespace raft::inmemory
         }
 
         void ManagerImpl::callAppendEntries(
-            const std::string& address,
+            const std::string& clientAddress,
+            const std::string& externalAddress,
             const data::AppendEntriesRequest& request,
             RequestConfig config,
             std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
         {
             std::unique_lock lock {mutex_};
-            if (detachedNetworks_.contains(address))
+            if (detachedNetworks_.contains(clientAddress)
+                || detachedNetworks_.contains(externalAddress))
             {
                 lock.unlock();
                 callback(tl::make_unexpected(errors::Unknown {.message = "network detached"}));
                 return;
             }
-            auto handler = handlers_[address].lock();
+            auto handler = handlers_[externalAddress].lock();
             lock.unlock();
             if (!handler)
             {
-                callback(tl::make_unexpected(
-                    errors::Unknown {.message = fmt::format("network not found: {}", address)}));
+                callback(tl::make_unexpected(errors::Unknown {
+                    .message = fmt::format("network not found: {}", externalAddress)}));
                 return;
             }
             handler->handleAppendEntries(request, std::move(callback));
         }
 
         void ManagerImpl::callRequestVote(
-            const std::string& address,
+            const std::string& clientAddress,
+            const std::string& externalAddress,
             const data::RequestVoteRequest& request,
             RequestConfig config,
             std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
         {
             std::unique_lock lock {mutex_};
-            if (detachedNetworks_.contains(address))
+            if (detachedNetworks_.contains(externalAddress)
+                || detachedNetworks_.contains(clientAddress))
             {
                 lock.unlock();
                 callback(tl::make_unexpected(errors::Unknown {.message = "network detached"}));
                 return;
             }
-            auto handler = handlers_[address].lock();
+            auto handler = handlers_[externalAddress].lock();
             lock.unlock();
             if (!handler)
             {
-                callback(tl::make_unexpected(
-                    errors::Unknown {.message = fmt::format("network not found: {}", address)}));
+                callback(tl::make_unexpected(errors::Unknown {
+                    .message = fmt::format("network not found: {}", externalAddress)}));
                 return;
             }
             handler->handleRequestVote(request, std::move(callback));

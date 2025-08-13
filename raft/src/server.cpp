@@ -328,12 +328,26 @@ namespace raft
         {
             return;
         }
+        lifecycle_ = Lifecycle::Stopping;
+        if (timer_)
+        {
+            timer_->cancel();
+        }
+        if (std::holds_alternative<LeaderInfo>(state_))
+        {
+            auto& leaderInfo = std::get<LeaderInfo>(state_);
+            for (auto& [_, leaderClientInfo] : leaderInfo.clients)
+            {
+                leaderClientInfo.heartbeatTimer.cancel();
+            }
+        }
 
         work_.reset();
         for (auto& thread : threads_)
         {
             thread.join();
         }
+        lifecycle_ = Lifecycle::Stopped;
     }
 
     data::PersistedState ServerImpl::getPersistedState() const
@@ -929,7 +943,7 @@ namespace raft
     {
         if (!response)
         {
-            spdlog::warn("failed to process RequestVote response: {}", response.error());
+            spdlog::info("received RequestVote response with error: {}", response.error());
             return;
         }
 

@@ -1,3 +1,5 @@
+#include <thread>
+
 #include <fmt/format.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -13,6 +15,9 @@ namespace
 {
     constexpr std::chrono::duration ELECTION_WAIT_PERIOD = std::chrono::seconds(1);
     constexpr auto THREAD_COUNT = 4;
+
+    constexpr uint64_t MAX_ELECTION_TIMEOUT = 300;
+    constexpr uint64_t MIN_ELECTION_TIMEOUT = 100;
 
     std::vector<raft::Peer> getPeers(std::vector<std::string> ids, std::string current)
     {
@@ -65,11 +70,15 @@ namespace
             manager = raft::inmemory::createManager();
             for (const auto& id : ids)
             {
+                auto clientFactoryResult = manager->createClientFactory(id);
+                EXPECT_TRUE(clientFactoryResult.has_value());
                 auto config = raft::ServerCreateConfig {
                     .id = id,
-                    .clientFactory = manager,
+                    .clientFactory = *clientFactoryResult,
                     .peers = getPeers(ids, id),
                     .persister = std::make_shared<NoOpPersister>(),
+                    .timeoutInterval = raft::TimeoutInterval {.min = MIN_ELECTION_TIMEOUT,
+                                                              .max = MAX_ELECTION_TIMEOUT},
                     .threadCount = THREAD_COUNT,
                 };
                 auto serverResult = raft::createServer(config);
@@ -166,4 +175,45 @@ TEST(ElectionTest, SimpleLeaderElection)
     auto result = tester.checkOneLeader();
     EXPECT_TRUE(result.has_value()) << "Expected one leader to be elected, but got error: "
                                     << (result.has_value() ? "" : result.error());
+}
+
+TEST(ElectionTest, LeaderReelectionAfterDisconnect)
+{
+    ElectionTester tester({"A", "B", "C"});
+
+    // First, get an election with all three networks connected
+    auto firstLeaderResult = tester.checkOneLeader();
+    ASSERT_TRUE(firstLeaderResult.has_value())
+        << "Expected one leader to be elected, but got error: " << firstLeaderResult.error();
+    std::string firstLeader = firstLeaderResult.value();
+    // Disconnect the leader
+    auto disconnectResult = tester.manager->detachNetwork(firstLeader);
+    EXPECT_TRUE(disconnectResult.has_value())
+        << fmt::format("Failed to disconnect leader: {}", disconnectResult.error());
+
+    // Wait the max election timeout for a new election
+    std::this_thread::sleep_for(std::chrono::milliseconds(MAX_ELECTION_TIMEOUT));
+
+    // Check for a new leader (should be different from the first leader)
+    auto secondLeaderResult = tester.checkOneLeader();
+    ASSERT_TRUE(secondLeaderResult.has_value())
+        << "Expected new leader to be elected, but got error: " << secondLeaderResult.error();
+    std::string secondLeader = secondLeaderResult.value();
+    EXPECT_NE(firstLeader, secondLeader) << "Expected a different leader after disconnection";
+
+    // Reconnect the previous leader
+    auto reconnectResult = tester.manager->attachNetwork(firstLeader);
+    EXPECT_TRUE(reconnectResult.has_value())
+        << fmt::format("Failed to reconnect leader: {}", reconnectResult.error());
+
+    // Wait the election timeout
+    std::this_thread::sleep_for(std::chrono::milliseconds(MAX_ELECTION_TIMEOUT));
+
+    // Check that the second leader is still the leader
+    auto finalLeaderResult = tester.checkOneLeader();
+    ASSERT_TRUE(finalLeaderResult.has_value())
+        << "Expected leader to remain, but got error: " << finalLeaderResult.error();
+    std::string finalLeader = finalLeaderResult.value();
+    EXPECT_EQ(secondLeader, finalLeader)
+        << "Expected second leader to remain leader after reconnection";
 }

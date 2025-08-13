@@ -41,7 +41,10 @@ TEST(InMemoryManagerTest, NetworkStartStopAndClientErrorHandling)
     EXPECT_TRUE(startResult.has_value());
     EXPECT_EQ(startResult.value(), "test-server-address");
 
-    auto clientResult = manager->createClient("test-server-address");
+    auto clientFactoryResult = manager->createClientFactory("test-server-address");
+    EXPECT_TRUE(clientFactoryResult.has_value());
+    auto clientFactory = *clientFactoryResult;
+    auto clientResult = clientFactory->createClient("test-server-address");
     EXPECT_TRUE(clientResult.has_value());
     auto client = std::move(clientResult.value());
 
@@ -114,7 +117,10 @@ TEST(InMemoryManagerTest, SingleClientNetworkAppendEntries)
     auto network = networkResult.value();
     auto startResult = network->start("test-address");
     EXPECT_TRUE(startResult.has_value());
-    auto clientResult = manager->createClient("test-address");
+    auto clientFactoryResult = manager->createClientFactory("test-address");
+    EXPECT_TRUE(clientFactoryResult.has_value());
+    auto clientFactory = *clientFactoryResult;
+    auto clientResult = clientFactory->createClient("test-address");
     EXPECT_TRUE(clientResult.has_value());
     auto client = std::move(clientResult.value());
     EXPECT_TRUE(client != nullptr);
@@ -175,11 +181,17 @@ TEST(InMemoryManagerTest, TwoServersWithTwoClientsAppendEntries)
     EXPECT_TRUE(startResult2.has_value());
 
     // Create clients for cross-communication: client1 -> server2, client2 -> server1
-    auto client1Result = manager->createClient("server2-address");
+    auto clientFactory1Result = manager->createClientFactory("server2-address");
+    EXPECT_TRUE(clientFactory1Result.has_value());
+    auto clientFactory1 = *clientFactory1Result;
+    auto client1Result = clientFactory1->createClient("server2-address");
     EXPECT_TRUE(client1Result.has_value());
     auto client1 = std::move(client1Result.value());
 
-    auto client2Result = manager->createClient("server1-address");
+    auto clientFactory2Result = manager->createClientFactory("server1-address");
+    EXPECT_TRUE(clientFactory2Result.has_value());
+    auto clientFactory2 = *clientFactory2Result;
+    auto client2Result = clientFactory2->createClient("server1-address");
     EXPECT_TRUE(client2Result.has_value());
     auto client2 = std::move(client2Result.value());
 

@@ -15,9 +15,11 @@ namespace raft::inmemory
     ///
     /// The Manager coordinates the creation of both networks and clients that can communicate
     /// with each other through shared memory rather than network protocols.
-    class Manager : public raft::ClientFactory
+    class Manager
     {
       public:
+        virtual ~Manager() = default;
+
         /// Creates a new in-memory network instance.
         ///
         /// The created network will handle Raft protocol messages (AppendEntries, RequestVote)
@@ -26,8 +28,11 @@ namespace raft::inmemory
         ///
         /// @param config Configuration containing the service handler for processing requests
         /// @return A shared pointer to the network instance or an error if creation fails
-        virtual tl::expected<std::shared_ptr<raft::Network>, raft::Error> createNetwork(
+        virtual tl::expected<std::shared_ptr<Network>, Error> createNetwork(
             const NetworkCreateConfig& config) = 0;
+
+        virtual tl::expected<std::shared_ptr<ClientFactory>, Error> createClientFactory(
+            const std::string& clientAddress) = 0;
 
         /// Detaches a network from the in-memory fabric, preventing it
         /// from sending or receiving messages.
