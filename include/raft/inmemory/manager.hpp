@@ -21,12 +21,21 @@ namespace raft::inmemory
         /// Creates a new in-memory network instance.
         ///
         /// The created network will handle Raft protocol messages (AppendEntries, RequestVote)
-        /// through direct method calls rather than network communication.
+        /// through direct method calls rather than network communication. Each network will be
+        /// attached to the fabric upon calling the network's start() method.
         ///
         /// @param config Configuration containing the service handler for processing requests
         /// @return A shared pointer to the network instance or an error if creation fails
         virtual tl::expected<std::shared_ptr<raft::Network>, raft::Error> createNetwork(
             const NetworkCreateConfig& config) = 0;
+
+        /// Detaches a network from the in-memory fabric, preventing it
+        /// from sending or receiving messages.
+        /// @param address The address of the node to detach or an error
+        virtual tl::expected<void, Error> detachNetwork(const std::string& address) = 0;
+        /// Re-attaches a previously detached network node, restoring communication.
+        /// @param address The address of the node to attach.
+        virtual tl::expected<void, Error> attachNetwork(const std::string& address) = 0;
     };
 
     /// Creates a new Manager instance for in-memory Raft operations.

@@ -145,6 +145,8 @@ namespace raft
 
             [[nodiscard]] std::string getId() const override;
 
+            [[nodiscard]] tl::expected<Status, Error> getStatus() const override;
+
           private:
             data::PersistedState getPersistedState() const;
             bool shutdownCalled() const
@@ -172,6 +174,10 @@ namespace raft
             void processGetCommitIndex(std::function<void(uint64_t)> callback) const;
             void processGetLogByteCount(std::function<void(uint64_t)> callback) const;
             void processGetLeaderID(std::function<void(std::optional<std::string>)> callback) const;
+
+            void invokeLeaderChangedCallback(const std::optional<std::string>& leaderID,
+                                             bool isLeader,
+                                             bool lostLeadership);
 
             // postPersist serializes the current state and creates a new persist request to the
             // persistence handler.
@@ -487,11 +493,24 @@ namespace raft
         {
             return tl::make_unexpected(errors::NotRunning {});
         }
-        std::promise<uint64_t> promise;
+        std::promise<tl::expected<uint64_t, Error>> promise;
         auto future = promise.get_future();
         asio::post(strand_,
                    [this, &promise]
-                   { processGetTerm([&promise](uint64_t term) { promise.set_value(term); }); });
+                   {
+                       postPersist(
+                           [this, &promise, term = term_](tl::expected<void, Error> result)
+                           {
+                               if (!result)
+                               {
+                                   spdlog::error("failed to persist state before getTerm: {}",
+                                                 result.error());
+                                   promise.set_value(tl::make_unexpected(result.error()));
+                                   return;
+                               }
+                               promise.set_value(term);
+                           });
+                   });
         return future.get();
     }
 
@@ -502,12 +521,25 @@ namespace raft
         {
             return tl::make_unexpected(errors::NotRunning {});
         }
-        std::promise<uint64_t> promise;
+        std::promise<tl::expected<uint64_t, Error>> promise;
         auto future = promise.get_future();
         asio::post(
             strand_,
             [this, &promise]
-            { processGetCommitIndex([&promise](uint64_t index) { promise.set_value(index); }); });
+            {
+                postPersist(
+                    [this, &promise, commitIndex = commitIndex_](tl::expected<void, Error> result)
+                    {
+                        if (!result)
+                        {
+                            spdlog::error("failed to persist state before getCommitIndex: {}",
+                                          result.error());
+                            promise.set_value(tl::make_unexpected(result.error()));
+                            return;
+                        }
+                        promise.set_value(commitIndex);
+                    });
+            });
         return future.get();
     }
 
@@ -518,12 +550,26 @@ namespace raft
         {
             return tl::make_unexpected(errors::NotRunning {});
         }
-        std::promise<uint64_t> promise;
+        std::promise<tl::expected<uint64_t, Error>> promise;
         auto future = promise.get_future();
-        asio::post(
-            strand_,
-            [this, &promise]
-            { processGetLogByteCount([&promise](uint64_t count) { promise.set_value(count); }); });
+        asio::post(strand_,
+                   [this, &promise]
+                   {
+                       const uint64_t count = log_.entries.size() * sizeof(data::LogEntry);
+                       postPersist(
+                           [this, &promise, count](tl::expected<void, Error> result)
+                           {
+                               if (!result)
+                               {
+                                   spdlog::error(
+                                       "failed to persist state before getLogByteCount: {}",
+                                       result.error());
+                                   promise.set_value(tl::make_unexpected(result.error()));
+                                   return;
+                               }
+                               promise.set_value(count);
+                           });
+                   });
         return future.get();
     }
 
@@ -534,20 +580,34 @@ namespace raft
         {
             return tl::make_unexpected(errors::NotRunning {});
         }
-        std::promise<std::optional<std::string>> promise;
+        std::promise<tl::expected<std::optional<std::string>, Error>> promise;
         auto future = promise.get_future();
         asio::post(strand_,
                    [this, &promise]
                    {
-                       processGetLeaderID([&promise](std::optional<std::string> id)
-                                          { promise.set_value(id); });
+                       postPersist(
+                           [this, &promise, lastLeaderID = lastLeaderID_](tl::expected<void, Error> result)
+                           {
+                               if (!result)
+                               {
+                                   spdlog::error("failed to persist state before getLeaderID: {}",
+                                                 result.error());
+                                   promise.set_value(tl::make_unexpected(result.error()));
+                                   return;
+                               }
+                               promise.set_value(lastLeaderID);
+                           });
                    });
         auto result = future.get();
         if (!result)
         {
+            return tl::make_unexpected(result.error());
+        }
+        if (!result.value())
+        {
             return tl::make_unexpected(errors::UnknownLeader {});
         }
-        return result.value();
+        return result.value().value();
     }
 
     tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
@@ -572,6 +632,40 @@ namespace raft
     std::string ServerImpl::getId() const
     {
         return id_;
+    }
+
+    tl::expected<Status, Error> ServerImpl::getStatus() const
+    {
+        auto guard = work_;
+        if (shutdownCalled())
+        {
+            return tl::make_unexpected(errors::NotRunning {});
+        }
+
+        std::promise<tl::expected<Status, Error>> promise;
+        auto future = promise.get_future();
+        asio::post(strand_,
+                   [this, &promise]
+                   {
+                       Status status {.isLeader = std::holds_alternative<LeaderInfo>(state_),
+                                      .leaderID = lastLeaderID_,
+                                      .term = term_,
+                                      .commitIndex = commitIndex_,
+                                      .logByteCount = log_.entries.size() * sizeof(data::LogEntry)};
+                       postPersist(
+                           [this, &promise, status](tl::expected<void, Error> result)
+                           {
+                               if (!result)
+                               {
+                                   spdlog::error("failed to persist state before getStatus: {}",
+                                                 result.error());
+                                   promise.set_value(tl::make_unexpected(result.error()));
+                                   return;
+                               }
+                               promise.set_value(status);
+                           });
+                   });
+        return future.get();
     }
 
     void ServerImpl::setCommitCallback(CommitCallback callback)
@@ -676,9 +770,9 @@ namespace raft
             becomeFollower();
             auto previousLeaderID = lastLeaderID_;
             lastLeaderID_ = request.leaderID;
-            if (leaderChangedCallback_ && previousLeaderID != lastLeaderID_)
+            if (previousLeaderID != lastLeaderID_)
             {
-                (*leaderChangedCallback_)(lastLeaderID_, false, lostLeadership);
+                invokeLeaderChangedCallback(lastLeaderID_, false, lostLeadership);
             }
         }
         else
@@ -752,6 +846,27 @@ namespace raft
         std::function<void(std::optional<std::string>)> callback) const
     {
         callback(lastLeaderID_);
+    }
+
+    void ServerImpl::invokeLeaderChangedCallback(const std::optional<std::string>& leaderID,
+                                                 bool isLeader,
+                                                 bool lostLeadership)
+    {
+        postPersist(
+            [this, leaderID, isLeader, lostLeadership](tl::expected<void, Error> result)
+            {
+                if (!result)
+                {
+                    spdlog::error("failed to persist state before leader changed callback: {}",
+                                  result.error());
+                    return;
+                }
+                std::lock_guard lock {mutex_};
+                if (leaderChangedCallback_)
+                {
+                    (*leaderChangedCallback_)(leaderID, isLeader, lostLeadership);
+                }
+            });
     }
 
     void ServerImpl::postPersist(std::function<void(tl::expected<void, Error>)> callback) const
@@ -874,6 +989,7 @@ namespace raft
                                                   }});
             scheduleHeartbeatTimeout(client.id);
         }
+        invokeLeaderChangedCallback(id_, true, false);
     }
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)

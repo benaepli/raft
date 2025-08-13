@@ -42,6 +42,10 @@ namespace raft::errors::detail
         {
             return "unknown leader";
         }
+        if constexpr (std::is_same_v<T, NonexistentNetwork>)
+        {
+            return "nonexistent network";
+        }
         return "unknown error";
     }
 
@@ -49,7 +53,8 @@ namespace raft::errors::detail
     concept SimpleError = std::is_same_v<T, Timeout> || std::is_same_v<T, Unimplemented>
         || std::is_same_v<T, NotLeader> || std::is_same_v<T, AlreadyRunning>
         || std::is_same_v<T, NotRunning> || std::is_same_v<T, FailedToStart>
-        || std::is_same_v<T, Deserialization> || std::is_same_v<T, UnknownLeader>;
+        || std::is_same_v<T, Deserialization> || std::is_same_v<T, UnknownLeader>
+        || std::is_same_v<T, NonexistentNetwork>;
 }  // namespace raft::errors::detail
 
 template<>

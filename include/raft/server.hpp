@@ -90,6 +90,17 @@ namespace raft
             std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback) = 0;
     };
 
+    /// A consistent snapshot of the server's state.
+    struct Status
+    {
+        bool isLeader;  ///< Whether this server is currently the leader.
+        std::optional<std::string>
+            leaderID;  ///< The ID of the current leader, or std::nullopt if unknown.
+        uint64_t term;  ///< The current term of the server.
+        uint64_t commitIndex;  ///< The index of the last committed log entry.
+        uint64_t logByteCount;  ///< The total size of the log in bytes.
+    };
+
     /// The Raft server interface. This is the main interface for the Raft server. All functions are
     /// thread-safe.
     class Server : public ServiceHandler
@@ -136,6 +147,10 @@ namespace raft
         /// Returns the ID of the server.
         /// @return The server's ID.
         [[nodiscard]] virtual std::string getId() const = 0;
+
+        /// Returns a consistent snapshot of the server's current state.
+        /// @return The server's status if it has not been shut down.
+        [[nodiscard]] virtual tl::expected<Status, Error> getStatus() const = 0;
     };
 
     /// Creates a new Raft server with the given configuration.

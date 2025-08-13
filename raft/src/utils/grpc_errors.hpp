@@ -60,7 +60,9 @@ namespace raft::errors
                 [](const Deserialization&)
                 { return grpc::Status(grpc::StatusCode::DATA_LOSS, "Deserialization failed"); },
                 [](const UnknownLeader&)
-                { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Unknown leader"); }},
+                { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Unknown leader"); },
+                [](const NonexistentNetwork&)
+                { return grpc::Status(grpc::StatusCode::NOT_FOUND, "Network does not exist"); }},
             error);
     }
 }  // namespace raft::errors

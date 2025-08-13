@@ -26,6 +26,83 @@ class MockServiceHandler : public raft::ServiceHandler
         (override));
 };
 
+TEST(InMemoryManagerTest, NetworkStartStopAndClientErrorHandling)
+{
+    auto mockHandler = std::make_shared<MockServiceHandler>();
+    auto manager = raft::inmemory::createManager();
+    EXPECT_TRUE(manager != nullptr);
+
+    raft::inmemory::NetworkCreateConfig const config {.handler = mockHandler};
+    auto networkResult = manager->createNetwork(config);
+    EXPECT_TRUE(networkResult.has_value());
+    auto network = networkResult.value();
+
+    auto startResult = network->start("test-server-address");
+    EXPECT_TRUE(startResult.has_value());
+    EXPECT_EQ(startResult.value(), "test-server-address");
+
+    auto clientResult = manager->createClient("test-server-address");
+    EXPECT_TRUE(clientResult.has_value());
+    auto client = std::move(clientResult.value());
+
+    // Verify client can communicate while network is running
+    raft::data::AppendEntriesRequest request {.term = 1,
+                                              .leaderID = "leader",
+                                              .prevLogIndex = 1,
+                                              .prevLogTerm = 1,
+                                              .entries = {},
+                                              .leaderCommit = 1};
+    raft::data::AppendEntriesResponse response {.term = 1, .success = true};
+
+    EXPECT_CALL(*mockHandler, handleAppendEntries(request, testing::_))
+        .Times(1)
+        .WillOnce(testing::Invoke([response](const raft::data::AppendEntriesRequest&, auto callback)
+                                  { callback(response); }));
+
+    std::promise<tl::expected<raft::data::AppendEntriesResponse, raft::Error>> promise1;
+    std::future<tl::expected<raft::data::AppendEntriesResponse, raft::Error>> future1 =
+        promise1.get_future();
+
+    client->appendEntries(
+        request,
+        raft::RequestConfig(),
+        [&promise1](tl::expected<raft::data::AppendEntriesResponse, raft::Error> result)
+        { promise1.set_value(result); });
+
+    ASSERT_TRUE(future1.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready);
+    auto result1 = future1.get();
+    ASSERT_TRUE(result1.has_value());
+    ASSERT_EQ(result1.value(), response);
+
+    auto stopResult = network->stop();
+    EXPECT_TRUE(stopResult.has_value());
+
+    raft::data::AppendEntriesRequest request2 {.term = 2,
+                                               .leaderID = "leader2",
+                                               .prevLogIndex = 2,
+                                               .prevLogTerm = 2,
+                                               .entries = {},
+                                               .leaderCommit = 2};
+
+    std::promise<tl::expected<raft::data::AppendEntriesResponse, raft::Error>> promise2;
+    std::future<tl::expected<raft::data::AppendEntriesResponse, raft::Error>> future2 =
+        promise2.get_future();
+
+    client->appendEntries(
+        std::move(request2),
+        raft::RequestConfig(),
+        [&promise2](tl::expected<raft::data::AppendEntriesResponse, raft::Error> result)
+        { promise2.set_value(result); });
+
+    ASSERT_TRUE(future2.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready);
+    auto result2 = future2.get();
+    ASSERT_FALSE(result2.has_value());
+
+    EXPECT_TRUE(std::holds_alternative<raft::errors::Unknown>(result2.error()));
+    auto unknownError = std::get<raft::errors::Unknown>(result2.error());
+    EXPECT_EQ(unknownError.message, "network not found");
+}
+
 TEST(InMemoryManagerTest, SingleClientNetworkAppendEntries)
 {
     auto mockHandler = std::make_shared<MockServiceHandler>();

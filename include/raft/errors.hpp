@@ -59,6 +59,11 @@ namespace raft
         struct UnknownLeader
         {
         };
+
+        /// The network does not exist.
+        struct NonexistentNetwork
+        {
+        };
     }  // namespace errors
 
     using Error = std::variant<errors::Unknown,
@@ -70,6 +75,7 @@ namespace raft
                                errors::NotRunning,
                                errors::FailedToStart,
                                errors::Deserialization,
-                               errors::UnknownLeader>;
+                               errors::UnknownLeader,
+                               errors::NonexistentNetwork>;
 
 }  // namespace raft
