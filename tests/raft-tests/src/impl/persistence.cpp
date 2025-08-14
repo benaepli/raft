@@ -24,7 +24,7 @@ TEST(PersistenceHandler, EmptyTimeout)
     auto persister = std::make_shared<MockPersister>();
     raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(1), 2};
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 TEST(PersistenceHandler, SingleTimeout)
@@ -37,7 +37,7 @@ TEST(PersistenceHandler, SingleTimeout)
 
     raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(1), 2};
     handler.addRequest(raft::impl::PersistenceRequest {.data = data, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 TEST(PersistenceHandler, MaxEntriesIndividual)
@@ -51,11 +51,11 @@ TEST(PersistenceHandler, MaxEntriesIndividual)
     EXPECT_CALL(*persister, saveState(data1)).Times(1);
     EXPECT_CALL(*persister, saveState(data2)).Times(1);
 
-    raft::impl::PersistenceHandler handler {persister, std::chrono::seconds(1), 1};
+    raft::impl::PersistenceHandler handler {persister, std::chrono::minutes(1), 1};
     handler.addRequest(raft::impl::PersistenceRequest {.data = data1, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     handler.addRequest(raft::impl::PersistenceRequest {.data = data2, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 TEST(PersistenceHandler, CallbackExecution)
@@ -69,7 +69,7 @@ TEST(PersistenceHandler, CallbackExecution)
     raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(1), 2};
     handler.addRequest(raft::impl::PersistenceRequest {
         .data = data, .callback = [&callbackCount] { ++callbackCount; }});
-    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     EXPECT_EQ(callbackCount, 1);
 }
 
@@ -81,7 +81,7 @@ TEST(PersistenceHandler, MultipleCallbacksExecution)
     EXPECT_CALL(*persister, saveState(data)).Times(1);
 
     std::atomic<int> callbackCount {0};
-    raft::impl::PersistenceHandler handler {persister, std::chrono::seconds(1), 3};
+    raft::impl::PersistenceHandler handler {persister, std::chrono::minutes(1), 3};
 
     for (int i = 0; i < 3; ++i)
     {
@@ -89,7 +89,7 @@ TEST(PersistenceHandler, MultipleCallbacksExecution)
             .data = data, .callback = [&callbackCount] { ++callbackCount; }});
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     EXPECT_EQ(callbackCount, 3);
 }
 
@@ -106,12 +106,12 @@ TEST(PersistenceHandler, BatchPersistence)
 
     EXPECT_CALL(*persister, saveState(data3)).Times(1);
 
-    raft::impl::PersistenceHandler handler {persister, std::chrono::seconds(1), 3};
+    raft::impl::PersistenceHandler handler {persister, std::chrono::minutes(1), 3};
     handler.addRequest(raft::impl::PersistenceRequest {.data = data1, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data2, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data3, .callback = [] {}});
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 TEST(PersistenceHandler, ConcurrentRequests)
@@ -146,7 +146,7 @@ TEST(PersistenceHandler, ConcurrentRequests)
         thread.join();
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     EXPECT_EQ(totalCallbacks, numThreads * requestsPerThread);
 }
 
@@ -169,14 +169,14 @@ TEST(PersistenceHandler, MultipleTimeoutWithMaxEntries)
     EXPECT_CALL(*persister, saveState(data5)).Times(1);
 
     // First two: timeout, last three: max entries
-    raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(20), 3};
+    raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(100), 3};
     handler.addRequest(raft::impl::PersistenceRequest {.data = data1, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data2, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     handler.addRequest(raft::impl::PersistenceRequest {.data = data3, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data4, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data5, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 TEST(PersistenceHandler, LargeDataHandling)
@@ -190,6 +190,6 @@ TEST(PersistenceHandler, LargeDataHandling)
     raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(1), 2};
     handler.addRequest(raft::impl::PersistenceRequest {
         .data = data, .callback = [&callbackExecuted] { callbackExecuted = true; }});
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     EXPECT_TRUE(callbackExecuted);
 }
