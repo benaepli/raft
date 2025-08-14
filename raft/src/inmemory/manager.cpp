@@ -221,7 +221,9 @@ namespace raft::inmemory
                 || detachedNetworks_.contains(externalAddress))
             {
                 lock.unlock();
-                callback(tl::make_unexpected(errors::Unknown {.message = "network detached"}));
+                callback(tl::make_unexpected(errors::Unknown {
+                    .message = fmt::format(
+                        "network detached from {} to {}", clientAddress, externalAddress)}));
                 return;
             }
             auto handler = handlers_[externalAddress].lock();
@@ -247,7 +249,9 @@ namespace raft::inmemory
                 || detachedNetworks_.contains(clientAddress))
             {
                 lock.unlock();
-                callback(tl::make_unexpected(errors::Unknown {.message = "network detached"}));
+                callback(tl::make_unexpected(errors::Unknown {
+                    .message = fmt::format(
+                        "network detached from {} to {}", clientAddress, externalAddress)}));
                 return;
             }
             auto handler = handlers_[externalAddress].lock();

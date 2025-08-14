@@ -399,7 +399,7 @@ namespace raft
         auto it = leaderInfo.clients.find(id);
         if (it == leaderInfo.clients.end())
         {
-            spdlog::error("Unknown client ID: {}", id);
+            spdlog::error("[{}] unknown client ID: {}", id_, id);
             return;
         }
         auto& leaderClientInfo = it->second;
@@ -458,8 +458,10 @@ namespace raft
                             {
                                 if (!result)
                                 {
-                                    spdlog::error("failed to persist state after AppendEntries: {}",
-                                                  result.error());
+                                    spdlog::error(
+                                        "[{}] failed to persist state after AppendEntries: {}",
+                                        id_,
+                                        result.error());
                                     callback(tl::make_unexpected(result.error()));
                                     return;
                                 }
@@ -493,7 +495,8 @@ namespace raft
                                        if (!result)
                                        {
                                            spdlog::error(
-                                               "failed to persist state after RequestVote: {}",
+                                               "[{}] failed to persist state after RequestVote: {}",
+                                               id_,
                                                result.error());
                                            callback(tl::make_unexpected(result.error()));
                                            return;
@@ -521,7 +524,8 @@ namespace raft
                            {
                                if (!result)
                                {
-                                   spdlog::error("failed to persist state before getTerm: {}",
+                                   spdlog::error("[{}] failed to persist state before getTerm: {}",
+                                                 id_,
                                                  result.error());
                                    promise.set_value(tl::make_unexpected(result.error()));
                                    return;
@@ -550,7 +554,8 @@ namespace raft
                     {
                         if (!result)
                         {
-                            spdlog::error("failed to persist state before getCommitIndex: {}",
+                            spdlog::error("[{}] failed to persist state before getCommitIndex: {}",
+                                          id_,
                                           result.error());
                             promise.set_value(tl::make_unexpected(result.error()));
                             return;
@@ -580,7 +585,8 @@ namespace raft
                                if (!result)
                                {
                                    spdlog::error(
-                                       "failed to persist state before getLogByteCount: {}",
+                                       "[{}] failed to persist state before getLogByteCount: {}",
+                                       id_,
                                        result.error());
                                    promise.set_value(tl::make_unexpected(result.error()));
                                    return;
@@ -609,7 +615,8 @@ namespace raft
                     {
                         if (!result)
                         {
-                            spdlog::error("failed to persist state before getLeaderID: {}",
+                            spdlog::error("[{}] failed to persist state before getLeaderID: {}",
+                                          id_,
                                           result.error());
                             promise.set_value(tl::make_unexpected(result.error()));
                             return;
@@ -676,8 +683,10 @@ namespace raft
                            {
                                if (!result)
                                {
-                                   spdlog::error("failed to persist state before getStatus: {}",
-                                                 result.error());
+                                   spdlog::error(
+                                       "[{}] failed to persist state before getStatus: {}",
+                                       id_,
+                                       result.error());
                                    promise.set_value(tl::make_unexpected(result.error()));
                                    return;
                                }
@@ -701,8 +710,14 @@ namespace raft
 
     void ServerImpl::processTimeout()
     {
+        if (std::holds_alternative<LeaderInfo>(state_))
+        {
+            return;
+        }
         term_++;
-        state_ = CandidateInfo {};
+        state_ = CandidateInfo {
+            .voteCount = 1,  // Vote for self
+        };
         scheduleTimeout();
 
         data::RequestVoteRequest request {
@@ -717,7 +732,8 @@ namespace raft
             {
                 if (!result)
                 {
-                    spdlog::error("failed to persist state during timeout: {}", result.error());
+                    spdlog::error(
+                        "[{}] failed to persist state during timeout: {}", id_, result.error());
                     return;
                 }
                 for (auto& client : clients_)
@@ -740,11 +756,12 @@ namespace raft
         auto it = leaderInfo.clients.find(id);
         if (it == leaderInfo.clients.end())
         {
-            spdlog::error("Unknown client ID: {}", id);
+            spdlog::error("[{}] unknown client ID: {}", id_, id);
             return;
         }
-        auto& leaderClientInfo = it->second;
         scheduleHeartbeatTimeout(id);
+
+        auto& leaderClientInfo = it->second;
         uint64_t nextIndex = leaderClientInfo.nextIndex;
         uint64_t lastIndex = std::min(nextIndex + leaderClientInfo.batchSize - 1, log_.lastIndex());
         std::vector<data::LogEntry> entries;
@@ -801,6 +818,10 @@ namespace raft
         auto& followerInfo = std::get<FollowerInfo>(state_);
         // TODO: Update the log.
         (void)followerInfo;
+        callback(data::AppendEntriesResponse {
+            .term = term_,
+            .success = true,
+        });
     }
 
     void ServerImpl::processInboundRequestVote(
@@ -876,7 +897,8 @@ namespace raft
             {
                 if (!result)
                 {
-                    spdlog::error("failed to persist state before leader changed callback: {}",
+                    spdlog::error("[{}] failed to persist state before leader changed callback: {}",
+                                  id_,
                                   result.error());
                     return;
                 }
@@ -925,7 +947,7 @@ namespace raft
         auto it = clientIndices_.find(id);
         if (it == clientIndices_.end())
         {
-            spdlog::error("Unknown client ID: {}", id);
+            spdlog::error("[{}] unknown client ID: {}", id_, id);
             return;
         }
         auto& client = clients_[it->second];
@@ -943,7 +965,8 @@ namespace raft
     {
         if (!response)
         {
-            spdlog::info("received RequestVote response with error: {}", response.error());
+            spdlog::info(
+                "[{}] received RequestVote response with error: {}", id_, response.error());
             return;
         }
 
@@ -962,7 +985,8 @@ namespace raft
 
         if (!std::holds_alternative<CandidateInfo>(state_))
         {
-            spdlog::error("Received RequestVote response in unexpected state: {}", state_);
+            // This might happen if we receive a RequestVote response after we have already
+            // become the leader.
             return;
         }
         auto& candidateInfo = std::get<CandidateInfo>(state_);
@@ -983,7 +1007,25 @@ namespace raft
     void ServerImpl::onAppendEntriesResponse(
         const std::string& id, tl::expected<data::AppendEntriesResponse, Error> response)
     {
-        // TODO: Implement AppendEntries response handling.
+        if (!response)
+        {
+            spdlog::info(
+                "[{}] received AppendEntries response with error: {}", id_, response.error());
+            return;
+        }
+
+        const auto& voteResponse = *response;
+        if (voteResponse.term < term_)
+        {
+            // We have already moved on to a newer term, so we ignore this response.
+            return;
+        }
+        if (voteResponse.term > term_)
+        {
+            term_ = voteResponse.term;
+            becomeFollower();
+            return;
+        }
     }
 
     void ServerImpl::becomeFollower()
@@ -994,6 +1036,10 @@ namespace raft
 
     void ServerImpl::becomeLeader()
     {
+        if (timer_)
+        {
+            timer_->cancel();
+        }
         state_ = LeaderInfo {};
         auto& leaderInfo = std::get<LeaderInfo>(state_);
         leaderInfo.clients.reserve(clients_.size());
