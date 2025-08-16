@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -28,87 +29,17 @@ namespace raft::impl
       public:
         PersistenceHandler(std::shared_ptr<Persister> persister,
                            std::chrono::microseconds interval,
-                           uint64_t maxEntries)
-            : persister_(std::move(persister))
-            , interval_(interval)
-            , maxEntries_(maxEntries)
-            , thread_(&PersistenceHandler::run, this)
-        {
-            resetTimer();
-        }
+                           uint64_t maxEntries);
 
-        ~PersistenceHandler()
-        {
-            running_ = false;
-            condition_.notify_all();
-            thread_.join();
-        }
+        ~PersistenceHandler();
 
-        void addRequest(PersistenceRequest request)
-        {
-            std::lock_guard lock {mutex_};
-            callbacks_.push(std::move(request.callback));
-            data_ = std::move(request.data);
-            condition_.notify_one();
-        }
+        void addRequest(PersistenceRequest request);
 
       private:
-        void resetTimer() { lastPersisted_ = std::chrono::steady_clock::now(); }
-
-        void run()
-        {
-            while (true)
-            {
-                std::unique_lock lock {mutex_};
-
-                // First, wait indefinitely if the queue is empty.
-                condition_.wait(lock, [this] { return !callbacks_.empty() || !running_; });
-                if (!running_)
-                {
-                    return;
-                }
-
-                // Then, wait until either the timer expires or the queue contains more than
-                // MAX_LOG_ENTRIES.
-                condition_.wait_until(lock,
-                                      nextPersistTime(),
-                                      [this]
-                                      { return callbacks_.size() >= maxEntries_ || !running_; });
-                if (!running_)
-                {
-                    return;
-                }
-
-                persist(lock);
-                resetTimer();
-            }
-        }
-
-        // Persist all requests in the queue. This requires the caller to obtain a lock on the
-        // mutex.
-        void persist(std::unique_lock<std::mutex>& lock)
-        {
-            std::queue<std::function<void()> > requests;
-            requests.swap(callbacks_);
-
-            std::vector<std::byte> data;
-            data.swap(data_);
-
-            lock.unlock();
-
-            persister_->saveState(data);
-            while (!requests.empty())
-            {
-                auto& callback = requests.front();
-                callback();
-                requests.pop();
-            }
-        }
-
-        [[nodiscard]] std::chrono::time_point<std::chrono::steady_clock> nextPersistTime() const
-        {
-            return lastPersisted_ + interval_;
-        }
+        void resetTimer();
+        void run();
+        void persist(std::unique_lock<std::mutex>& lock);
+        [[nodiscard]] std::chrono::time_point<std::chrono::steady_clock> nextPersistTime() const;
 
         std::chrono::time_point<std::chrono::steady_clock> lastPersisted_;
         std::shared_ptr<Persister> persister_;
@@ -120,7 +51,7 @@ namespace raft::impl
         std::vector<std::byte> data_;
         std::condition_variable condition_;
 
-        std::thread thread_;
         std::atomic<bool> running_ = true;
+        std::thread thread_;
     };
 }  // namespace raft::impl

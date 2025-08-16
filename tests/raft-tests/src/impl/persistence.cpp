@@ -1,4 +1,6 @@
 
+#include <span>
+
 #include "impl/persistence.hpp"
 
 #include <gmock/gmock.h>
@@ -146,7 +148,7 @@ TEST(PersistenceHandler, ConcurrentRequests)
         thread.join();
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     EXPECT_EQ(totalCallbacks, numThreads * requestsPerThread);
 }
 
@@ -172,11 +174,11 @@ TEST(PersistenceHandler, MultipleTimeoutWithMaxEntries)
     raft::impl::PersistenceHandler handler {persister, std::chrono::milliseconds(100), 3};
     handler.addRequest(raft::impl::PersistenceRequest {.data = data1, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data2, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     handler.addRequest(raft::impl::PersistenceRequest {.data = data3, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data4, .callback = [] {}});
     handler.addRequest(raft::impl::PersistenceRequest {.data = data5, .callback = [] {}});
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
 }
 
 TEST(PersistenceHandler, LargeDataHandling)

@@ -1,4 +1,5 @@
-find_package(GTest CONFIG REQUIRED)
+find_package(GTest REQUIRED)
+find_package(spdlog REQUIRED)
 
 add_executable(raft_tests
         src/basic.cpp
@@ -8,5 +9,5 @@ add_executable(raft_tests
         src/election.cpp
         src/mocks/persister.hpp
 )
-target_link_libraries(raft_tests PRIVATE GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main raft)
+target_link_libraries(raft_tests PRIVATE GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main raft spdlog::spdlog)
 target_include_directories(raft_tests PRIVATE ${CMAKE_SOURCE_DIR}/raft/src src)

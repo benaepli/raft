@@ -94,7 +94,7 @@ namespace raft
         };
 
         // The maximum scheduled interval in microseconds between persistence events.
-        constexpr std::chrono::microseconds MAX_PERSISTENCE_INTERVAL(1000);
+        constexpr std::chrono::duration MAX_PERSISTENCE_INTERVAL = std::chrono::microseconds(500);
         // The maximum number of log entries before persistence is triggered.
         constexpr uint64_t MAX_LOG_ENTRIES(1024);
 
@@ -235,7 +235,9 @@ namespace raft
             mutable asio::strand<asio::io_context::executor_type> strand_;
             std::vector<std::thread> threads_;
 
-            std::unique_ptr<impl::PersistenceHandler> persistenceHandler_;
+            std::unique_ptr<impl::PersistenceHandler> persistenceHandler_ =
+                std::make_unique<impl::PersistenceHandler>(
+                    persister_, MAX_PERSISTENCE_INTERVAL, MAX_LOG_ENTRIES);
             std::unique_ptr<asio::steady_timer> timer_;
 
             RequestConfig requestConfig_ = {};
@@ -302,7 +304,7 @@ namespace raft
             {
                 return tl::make_unexpected(client.error());
             }
-            if (clientIndices_.contains(peer.id))
+            if (clientIndices_.find(peer.id) != clientIndices_.end())
             {
                 return tl::make_unexpected(
                     errors::InvalidArgument {fmt::format("duplicate peer id: {}", peer.id)});
@@ -427,8 +429,6 @@ namespace raft
                        [this]
                        {
                            lifecycle_ = Lifecycle::Running;
-                           persistenceHandler_ = std::make_unique<impl::PersistenceHandler>(
-                               persister_, MAX_PERSISTENCE_INTERVAL, MAX_LOG_ENTRIES);
                            scheduleTimeout();
                        });
         return {};
@@ -929,14 +929,13 @@ namespace raft
         const data::RequestVoteRequest& request,
         std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
     {
-        client.client->requestVote(request,
-                                   requestConfig_,
-                                   [this, guard = work_, callback = std::move(callback)](
-                                       tl::expected<data::RequestVoteResponse, Error> response)
-                                   {
-                                       (void)guard;
-                                       callback(std::move(response));
-                                   });
+        auto cb = [this, guard = work_, callback = std::move(callback)](
+                      tl::expected<data::RequestVoteResponse, Error> response)
+        {
+            (void)guard;
+            asio::post(strand_, [callback, response = std::move(response)] { callback(response); });
+        };
+        client.client->requestVote(request, requestConfig_, cb);
     }
 
     void ServerImpl::postAppendEntries(
@@ -951,21 +950,20 @@ namespace raft
             return;
         }
         auto& client = clients_[it->second];
-        client.client->appendEntries(request,
-                                     requestConfig_,
-                                     [this, guard = work_, callback = std::move(callback)](
-                                         tl::expected<data::AppendEntriesResponse, Error> response)
-                                     {
-                                         (void)guard;
-                                         callback(std::move(response));
-                                     });
+        auto cb = [this, guard = work_, callback = std::move(callback)](
+                      tl::expected<data::AppendEntriesResponse, Error> response)
+        {
+            (void)guard;
+            asio::post(strand_, [callback, response = std::move(response)] { callback(response); });
+        };
+        client.client->appendEntries(request, requestConfig_, cb);
     }
 
     void ServerImpl::onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response)
     {
         if (!response)
         {
-            spdlog::info(
+            spdlog::debug(
                 "[{}] received RequestVote response with error: {}", id_, response.error());
             return;
         }
@@ -1009,7 +1007,7 @@ namespace raft
     {
         if (!response)
         {
-            spdlog::info(
+            spdlog::debug(
                 "[{}] received AppendEntries response with error: {}", id_, response.error());
             return;
         }

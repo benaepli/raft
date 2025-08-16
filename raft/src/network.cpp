@@ -84,6 +84,7 @@ namespace raft
 
             tl::expected<std::string, Error> start(const std::string& address) override
             {
+                std::lock_guard lock {mutex_};
                 if (running_)
                 {
                     return tl::make_unexpected(errors::AlreadyRunning {});
@@ -109,14 +110,16 @@ namespace raft
 
             tl::expected<void, Error> stop() override
             {
-                if (running_)
+                std::lock_guard lock {mutex_};
+                if (!running_)
                 {
                     return tl::make_unexpected(errors::NotRunning {});
                 }
+                running_ = false;
 
                 server_->Shutdown();
+                server_->Wait();
                 server_.reset();
-                running_ = false;
 
                 return {};
             }
@@ -126,6 +129,7 @@ namespace raft
 
             bool isRunning() const { return server_ != nullptr; }
 
+            std::mutex mutex_;
             GrpcServiceImpl service_;
             std::unique_ptr<grpc::Server> server_;
             bool running_ = false;
