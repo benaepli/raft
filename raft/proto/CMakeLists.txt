@@ -1,5 +1,5 @@
-find_package(gRPC CONFIG REQUIRED)
-find_package(Protobuf CONFIG REQUIRED)
+find_package(gRPC REQUIRED)
+find_package(Protobuf REQUIRED)
 
 set(PROTO_FILES raft_protos/raft.proto)
 

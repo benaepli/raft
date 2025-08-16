@@ -44,11 +44,11 @@ See [DESIGN.md](DESIGN.md) for more information.
 
 ## Building
 
-This project uses CMake as its build system and vcpkg for dependency management.
-In CMakePresets.json, there is a preset for building with vcpkg. To use it, run:
+This project uses CMake as its build system and conan for dependency management.
+In CMakePresets.json, there is a preset for building with conan. To use it, run:
 
 ```bash
-cmake --preset vcpkg
+cmake --preset conan
 cmake --build build
 ```
 
@@ -57,3 +57,5 @@ There are three main targets in the CMake project:
 - `raft` - The library itself
 - `raft_tests` - The unit tests
 - `raft_cli` - A simple CLI application that uses the library
+
+For more detailed information, see [BUILDING.md](BUILDING.md).
