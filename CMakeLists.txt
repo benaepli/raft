@@ -9,6 +9,7 @@ set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 # Build options
 option(BUILD_TESTS "Build test programs" ON)
 option(BUILD_CLI "Build the CLI application" ON)
+option(BUILD_DOCS "Build Doxygen documentation" ON)
 
 add_subdirectory(raft)
 
@@ -19,4 +20,8 @@ endif ()
 if (BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif ()
+
+if (BUILD_DOCS)
+    add_subdirectory(doxygen)
 endif ()

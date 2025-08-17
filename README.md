@@ -40,7 +40,7 @@ In general, this code uses a lot of modern C++ features. I also avoid exceptions
 
 ## Design Philosophy
 
-See [DESIGN.md](DESIGN.md) for more information.
+See [docs/design.md](docs/design.md) for more information.
 
 ## Building
 
@@ -58,4 +58,9 @@ There are three main targets in the CMake project:
 - `raft_tests` - The unit tests
 - `raft_cli` - A simple CLI application that uses the library
 
-For more detailed information, see [BUILDING.md](BUILDING.md).
+For more detailed information, see [docs/building.md](docs/building.md).
+
+## Additional Resources
+
+- [Postmortems](docs/bugs/lessons-learned.md): A hopefully fun and instructive list of bugs I've encountered while
+  writing this library.

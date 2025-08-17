@@ -3,7 +3,7 @@
 ## Dependency Management
 
 This project requires Conan 2 for dependency management. The list of dependencies can be found in
-[conanfile.py](conanfile.py).
+[conanfile.py](../conanfile.py).
 
 To install conan, see the [Conan documentation](https://docs.conan.io/2/installation.html). You will need to create a
 Conan profile. ou can start by detecting your default host profile:
@@ -62,4 +62,3 @@ example, with my Conan debug profile:
 Then, we can simply switch to the `conan-local` preset and build.
 
 This project has been tested with Clang 20 and GCC 14. It should build with MSVC, but I have not tested it.
-
