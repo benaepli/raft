@@ -51,7 +51,7 @@ namespace raft::impl
         std::vector<std::byte> data_;
         std::condition_variable condition_;
 
-        std::atomic<bool> running_ = true;
+        bool running_ = true;
         std::thread thread_;
     };
 }  // namespace raft::impl
