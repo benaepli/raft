@@ -6,6 +6,7 @@
 #include "asio.hpp"
 #include "common/mpsc_queue.hpp"
 #include "fmt/core.h"
+#include "impl/log.hpp"
 #include "impl/persistence.hpp"
 #include "impl/state.hpp"
 #include "raft/fmt/errors.hpp"
@@ -15,74 +16,14 @@
 
 namespace raft
 {
+    using impl::Log;
     namespace
     {
-        using common::MPSCQueue;
         struct ClientInfo
         {
             std::unique_ptr<Client> client;
             std::string id;
             std::string address;
-        };
-
-        struct Log
-        {
-            std::vector<data::LogEntry> entries;
-            // The index of the first entry in the log.
-            // For instance, if the log contains entries with indices 10, 11, and 12, then baseIndex
-            // will be 10.
-            uint64_t baseIndex;
-
-            data::LogEntry* get(uint64_t index)
-            {
-                size_t offset = index - baseIndex;
-                if (offset >= entries.size())
-                {
-                    return nullptr;
-                }
-                return &entries[offset];
-            }
-
-            [[nodiscard]] data::LogEntry const* get(uint64_t index) const
-            {
-                size_t offset = index - baseIndex;
-                if (offset >= entries.size())
-                {
-                    return nullptr;
-                }
-                return &entries[offset];
-            }
-
-            // The index of the last entry in the log, or baseIndex - 1 if the log is empty.
-            uint64_t lastIndex() const { return baseIndex + entries.size() - 1; }
-
-            // The term of the last entry in the log, or 0 if the log is empty.
-            uint64_t lastTerm() const
-            {
-                const auto* entry = get(lastIndex());
-                if (entry == nullptr)
-                {
-                    return 0;
-                }
-                return entry->term;
-            }
-
-            bool candidateIsEligible(uint64_t candidateLastIndex, uint64_t candidateLastTerm) const
-            {
-                auto term = lastTerm();
-                auto index = lastIndex();
-                // If the candidate's log is empty, then we can only elect it if our log is also
-                // empty.
-                if (candidateLastIndex == 0)
-                {
-                    return index == 0;
-                }
-                if (term != candidateLastTerm)
-                {
-                    return term < candidateLastTerm;
-                }
-                return index <= candidateLastIndex;
-            }
         };
 
         enum class Lifecycle : uint8_t
@@ -99,8 +40,6 @@ namespace raft
         constexpr uint64_t MAX_LOG_ENTRIES(1024);
 
         // ServerImpl is the implementation of the Raft server.
-        // Note that this server does not conform to RAII. If not shutdown,
-        // the server will run indefinitely and manage its own lifecycle.
         class ServerImpl final : public Server
         {
           public:
@@ -135,7 +74,11 @@ namespace raft
 
             void setCommitCallback(CommitCallback callback) override;
 
+            void clearCommitCallback() override;
+
             void setLeaderChangedCallback(LeaderChangedCallback callback) override;
+
+            void clearLeaderChangedCallback() override;
 
             [[nodiscard]] tl::expected<uint64_t, Error> getTerm() const override;
 
@@ -162,22 +105,18 @@ namespace raft
 
             void processTimeout();
             void processHeartbeatTimeout(const std::string& id);
-            void processAppend(const std::vector<std::byte>& data,
-                               std::function<void(tl::expected<EntryInfo, Error>)> callback);
             void processInboundAppendEntries(
                 const data::AppendEntriesRequest& request,
                 std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback);
             void processInboundRequestVote(
                 const data::RequestVoteRequest& request,
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
-            void processGetTerm(std::function<void(uint64_t)> callback) const;
-            void processGetCommitIndex(std::function<void(uint64_t)> callback) const;
-            void processGetLogByteCount(std::function<void(uint64_t)> callback) const;
-            void processGetLeaderID(std::function<void(std::optional<std::string>)> callback) const;
 
             void invokeLeaderChangedCallback(const std::optional<std::string>& leaderID,
                                              bool isLeader,
                                              bool lostLeadership);
+
+            void invokeCommitCallback(uint64_t index);
 
             // postPersist serializes the current state and creates a new persist request to the
             // persistence handler.
@@ -194,12 +133,15 @@ namespace raft
 
             void onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response);
             void onAppendEntriesResponse(const std::string& id,
+                                         const data::AppendEntriesRequest& request,
                                          tl::expected<data::AppendEntriesResponse, Error> response);
 
             // becomeFollower transitions the server to the Follower state.
             void becomeFollower();
             // becomeLeader transitions the server to the Leader state.
             void becomeLeader();
+
+            void commitNewEntries();
 
             std::atomic<Lifecycle> lifecycle_ {Lifecycle::Initialized};
             std::once_flag startFlag_;
@@ -645,11 +587,34 @@ namespace raft
         }
         std::promise<tl::expected<EntryInfo, Error>> promise;
         auto future = promise.get_future();
+
         asio::post(strand_,
                    [this, data = std::move(data), &promise]() mutable
                    {
-                       // TODO: Implement append handling
-                       promise.set_value(tl::make_unexpected(errors::Unimplemented {}));
+                       bool isLeader = std::holds_alternative<LeaderInfo>(state_);
+                       std::optional<EntryInfo> entryInfo;
+                       if (isLeader)
+                       {
+                           entryInfo = log_.appendOne(term_, std::move(data));
+                       }
+                       postPersist(
+                           [this, &promise, entryInfo, isLeader](tl::expected<void, Error> result)
+                           {
+                               if (!result)
+                               {
+                                   spdlog::error("[{}] failed to persist state before append: {}",
+                                                 id_,
+                                                 result.error());
+                                   promise.set_value(tl::make_unexpected(result.error()));
+                                   return;
+                               }
+                               if (!isLeader)
+                               {
+                                   promise.set_value(tl::make_unexpected(errors::NotLeader {}));
+                                   return;
+                               }
+                               promise.set_value(*entryInfo);
+                           });
                    });
         return future.get();
     }
@@ -702,10 +667,22 @@ namespace raft
         commitCallback_ = callback;
     }
 
+    void ServerImpl::clearCommitCallback()
+    {
+        std::lock_guard lock {mutex_};
+        commitCallback_.reset();
+    }
+
     void ServerImpl::setLeaderChangedCallback(LeaderChangedCallback callback)
     {
         std::lock_guard lock {mutex_};
         leaderChangedCallback_ = callback;
+    }
+
+    void ServerImpl::clearLeaderChangedCallback()
+    {
+        std::lock_guard lock {mutex_};
+        leaderChangedCallback_.reset();
     }
 
     void ServerImpl::processTimeout()
@@ -770,7 +747,7 @@ namespace raft
             entries.push_back(*log_.get(i));
         }
         auto* prevLogEntry = log_.get(nextIndex - 1);
-        auto prevLogTerm = prevLogEntry ? prevLogEntry->term : 0;
+        auto prevLogTerm = prevLogEntry != nullptr ? prevLogEntry->term : 0;
 
         data::AppendEntriesRequest appendRequest {
             .term = term_,
@@ -780,10 +757,12 @@ namespace raft
             .entries = entries,
             .leaderCommit = commitIndex_,
         };
-        postAppendEntries(id,
-                          appendRequest,
-                          [this, id](tl::expected<data::AppendEntriesResponse, Error> response)
-                          { onAppendEntriesResponse(id, std::move(response)); });
+        leaderClientInfo.nextIndex = lastIndex + 1;
+        postAppendEntries(
+            id,
+            appendRequest,
+            [this, id, appendRequest](tl::expected<data::AppendEntriesResponse, Error> response)
+            { onAppendEntriesResponse(id, appendRequest, std::move(response)); });
     }
 
     void ServerImpl::processInboundAppendEntries(
@@ -811,13 +790,29 @@ namespace raft
                 invokeLeaderChangedCallback(lastLeaderID_, false, lostLeadership);
             }
         }
-        else
+
+        if (!log_.isConsistentWith(request.prevLogIndex, request.prevLogTerm))
         {
-            scheduleTimeout();
+            callback(data::AppendEntriesResponse {
+                .term = term_,
+                .success = false,
+            });
+            return;
         }
-        auto& followerInfo = std::get<FollowerInfo>(state_);
-        // TODO: Update the log.
-        (void)followerInfo;
+        scheduleTimeout();
+
+        log_.store(request.prevLogIndex + 1, request.entries);
+
+        if (request.leaderCommit > commitIndex_)
+        {
+            uint64_t const newCommitIndex = std::min(request.leaderCommit, log_.lastIndex());
+            for (uint64_t i = commitIndex_ + 1; i <= newCommitIndex; i++)
+            {
+                invokeCommitCallback(i);
+            }
+            commitIndex_ = newCommitIndex;
+        }
+
         callback(data::AppendEntriesResponse {
             .term = term_,
             .success = true,
@@ -866,28 +861,6 @@ namespace raft
         followerInfo.votedFor = request.candidateID;
     }
 
-    void ServerImpl::processGetTerm(std::function<void(uint64_t)> callback) const
-    {
-        callback(term_);
-    }
-
-    void ServerImpl::processGetCommitIndex(std::function<void(uint64_t)> callback) const
-    {
-        callback(commitIndex_);
-    }
-
-    void ServerImpl::processGetLogByteCount(std::function<void(uint64_t)> callback) const
-    {
-        const uint64_t count = log_.entries.size() * sizeof(data::LogEntry);
-        callback(count);
-    }
-
-    void ServerImpl::processGetLeaderID(
-        std::function<void(std::optional<std::string>)> callback) const
-    {
-        callback(lastLeaderID_);
-    }
-
     void ServerImpl::invokeLeaderChangedCallback(const std::optional<std::string>& leaderID,
                                                  bool isLeader,
                                                  bool lostLeadership)
@@ -908,6 +881,23 @@ namespace raft
                     (*leaderChangedCallback_)(leaderID, isLeader, lostLeadership);
                 }
             });
+    }
+
+    void ServerImpl::invokeCommitCallback(uint64_t index)
+    {
+        auto* logEntry = log_.get(index);
+        if (logEntry == nullptr)
+        {
+            spdlog::error("[{}] failed to get log entry at index {}", id_, index);
+            return;
+        }
+
+        std::lock_guard lock {mutex_};
+        if (commitCallback_)
+        {
+            EntryInfo info {.index = index, .term = logEntry->term};
+            (*commitCallback_)(info, logEntry->data);
+        }
     }
 
     void ServerImpl::postPersist(std::function<void(tl::expected<void, Error>)> callback) const
@@ -1003,7 +993,9 @@ namespace raft
     }
 
     void ServerImpl::onAppendEntriesResponse(
-        const std::string& id, tl::expected<data::AppendEntriesResponse, Error> response)
+        const std::string& id,
+        const data::AppendEntriesRequest& request,
+        tl::expected<data::AppendEntriesResponse, Error> response)
     {
         if (!response)
         {
@@ -1024,6 +1016,47 @@ namespace raft
             becomeFollower();
             return;
         }
+
+        if (!std::holds_alternative<LeaderInfo>(state_))
+        {
+            spdlog::error(
+                "[{}] received AppendEntries response in correct term while not a leader: {}",
+                id_,
+                id);
+            return;
+        }
+        auto& leaderInfo = std::get<LeaderInfo>(state_);
+        auto it = leaderInfo.clients.find(id);
+        if (it == leaderInfo.clients.end())
+        {
+            spdlog::error("[{}] unknown client ID: {}", id_, id);
+            return;
+        }
+        auto& leaderClientInfo = it->second;
+        if (!voteResponse.success)
+        {
+            if (leaderClientInfo.nextIndex < request.prevLogIndex + 1)
+            {
+                // If this is the case, then we don't need to lower nextIndex because
+                // another server has already done it for us.
+                return;
+            }
+            if (leaderClientInfo.matchIndex >= request.prevLogIndex)
+            {
+                // This safeguards against out-of-order responses. If we already know the server
+                // contains entries past and including prevLogIndex, then decrementing nextIndex
+                // would result in us re-sending them.
+                return;
+            }
+            leaderClientInfo.nextIndex = std::min(leaderClientInfo.nextIndex, request.prevLogIndex);
+            return;
+        }
+
+        const uint64_t newMatchIndex = request.prevLogIndex + request.entries.size();
+        leaderClientInfo.matchIndex = std::max(leaderClientInfo.matchIndex, newMatchIndex);
+        leaderClientInfo.nextIndex = std::max(leaderClientInfo.nextIndex, newMatchIndex + 1);
+
+        commitNewEntries();
     }
 
     void ServerImpl::becomeFollower()
@@ -1053,6 +1086,44 @@ namespace raft
             scheduleHeartbeatTimeout(client.id);
         }
         invokeLeaderChangedCallback(id_, true, false);
+    }
+
+    void ServerImpl::commitNewEntries()
+    {
+        auto leaderInfo = std::get_if<LeaderInfo>(&state_);
+        if (leaderInfo == nullptr)
+        {
+            spdlog::error("[{}] commitNewEntries called while not a leader", id_);
+            return;
+        }
+        uint64_t newCommitIndex = commitIndex_;
+        for (uint64_t n = log_.lastIndex(); n > commitIndex_; --n)
+        {
+            if (log_.get(n)->term != term_)
+            {
+                continue;
+            }
+
+            int majorityCount = 1;  // Leader itself.
+            for (const auto& [id, clientInfo] : leaderInfo->clients)
+            {
+                if (clientInfo.matchIndex >= n)
+                {
+                    majorityCount++;
+                }
+            }
+
+            if (majorityCount > (clients_.size() + 1) / 2)
+            {
+                newCommitIndex = n;
+                break;  // Found it, no need to check smaller indices.
+            }
+        }
+        for (auto i = commitIndex_ + 1; i <= newCommitIndex; i++)
+        {
+            invokeCommitCallback(i);
+        }
+        commitIndex_ = std::max(newCommitIndex, commitIndex_);
     }
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)

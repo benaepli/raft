@@ -127,10 +127,16 @@ namespace raft
         /// @param callback The callback function to set.
         virtual void setCommitCallback(CommitCallback callback) = 0;
 
+        /// Clears the commit callback.
+        virtual void clearCommitCallback() = 0;
+
         /// Sets the leader changed callback, which runs when the leader changes.
         /// The callback may be called on a different thread.
         /// @param callback The callback function to set.
         virtual void setLeaderChangedCallback(LeaderChangedCallback callback) = 0;
+
+        /// Clears the leader changed callback.
+        virtual void clearLeaderChangedCallback() = 0;
 
         /// Returns the current term.
         /// @return The current term if the server has not been shut down.

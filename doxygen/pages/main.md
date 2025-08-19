@@ -1,6 +1,6 @@
 \mainpage Raft Consensus Library Documentation
 
-Welcome to the main documentation for the **Raft Consensus Library**.
+Welcome to the main documentation for this Raft implementation.
 
 This site contains both high-level project information and the detailed API reference.
 

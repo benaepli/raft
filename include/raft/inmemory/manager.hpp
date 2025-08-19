@@ -11,7 +11,8 @@ namespace raft::inmemory
             handler;  ///< The service handler for processing Raft requests
     };
 
-    /// Manager provides an in-memory implementation for Raft networking and client creation.
+    /// @brief Manager provides an in-memory implementation for Raft networking and client
+    /// creation.
     ///
     /// The Manager coordinates the creation of both networks and clients that can communicate
     /// with each other through shared memory rather than network protocols.
