@@ -18,11 +18,17 @@ namespace raft
 
     namespace data
     {
+        /// NoOp is an empty struct that denotes a no-op log entry.
+        struct NoOp
+        {
+            bool operator==(const NoOp& other) const = default;
+        };
+
         /// LogEntry represents a single log entry in the Raft log.
         struct LogEntry
         {
             uint64_t term;  ///< The term of the log entry.
-            std::vector<std::byte> data;  ///< The data contained in the log entry.
+            std::variant<std::vector<std::byte>, NoOp> entry;  ///< The entry data or no-op.
 
             bool operator==(const LogEntry& other) const = default;
         };

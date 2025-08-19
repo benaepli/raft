@@ -126,10 +126,19 @@ namespace raft::impl
         auto index = lastIndex() + 1;
         auto entry = data::LogEntry {
             .term = term,
-            .data = std::move(data),
+            .entry = std::move(data),
         };
         entries.push_back(entry);
         return {.index = index, .term = term};
+    }
+
+    void Log::appendNoOp(uint64_t term)
+    {
+        auto entry = data::LogEntry {
+            .term = term,
+            .entry = data::NoOp {},
+        };
+        entries.push_back(entry);
     }
 
 }  // namespace raft::impl

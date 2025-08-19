@@ -893,11 +893,16 @@ namespace raft
         }
 
         std::lock_guard lock {mutex_};
-        if (commitCallback_)
+        if (!commitCallback_)
         {
-            EntryInfo info {.index = index, .term = logEntry->term};
-            (*commitCallback_)(info, logEntry->data);
+            return;
         }
+        EntryInfo info {.index = index, .term = logEntry->term};
+        if (std::holds_alternative<data::NoOp>(logEntry->entry))
+        {
+            return;
+        }
+        (*commitCallback_)(info, std::get<std::vector<std::byte>>(logEntry->entry));
     }
 
     void ServerImpl::postPersist(std::function<void(tl::expected<void, Error>)> callback) const
@@ -1086,6 +1091,7 @@ namespace raft
             scheduleHeartbeatTimeout(client.id);
         }
         invokeLeaderChangedCallback(id_, true, false);
+        log_.appendNoOp(term_);
     }
 
     void ServerImpl::commitNewEntries()

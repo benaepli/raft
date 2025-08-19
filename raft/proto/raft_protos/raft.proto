@@ -32,12 +32,19 @@ message AppendEntriesRequest {
   int64 leader_commit = 6;
 }
 
+// NoOp is an empty message that denotes a no-op log entry.
+message NoOp {}
+
 // LogEntry represents a single log entry in the Raft log.
 message LogEntry {
   // The term of the log entry.
   int64 term = 1;
-  // The data contained in the log entry.
-  bytes data = 2;
+  oneof entry {
+    // The data contained in the log entry.
+    bytes data = 2;
+    // An empty message that denotes a no-op log entry.
+    NoOp no_op = 3;
+  }
 }
 
 // The response message for the AppendEntries RPC.

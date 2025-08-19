@@ -37,6 +37,7 @@ namespace raft::impl
         void store(uint64_t startIndex, const std::vector<data::LogEntry>& newEntries);
 
         EntryInfo appendOne(uint64_t term, std::vector<std::byte> data);
+        void appendNoOp(uint64_t term);
 
       private:
         // Returns true if the new entries are conflicting with the existing entries.

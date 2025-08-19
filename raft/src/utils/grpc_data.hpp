@@ -22,17 +22,44 @@ namespace raft::data
     {
         raft_protos::LogEntry proto;
         proto.set_term(static_cast<int64_t>(entry.term));
-        proto.set_data(toString(entry.data));
+
+        std::visit(
+            [&proto](const auto& entryData)
+            {
+                using T = std::decay_t<decltype(entryData)>;
+                if constexpr (std::is_same_v<T, std::vector<std::byte>>)
+                {
+                    proto.set_data(toString(entryData));
+                }
+                else if constexpr (std::is_same_v<T, NoOp>)
+                {
+                    proto.mutable_no_op();
+                }
+            },
+            entry.entry);
 
         return proto;
     }
 
     inline LogEntry fromProto(const raft_protos::LogEntry& proto)
     {
-        return LogEntry {
-            .term = static_cast<uint64_t>(proto.term()),
-            .data = toBytes(proto.data()),
-        };
+        LogEntry entry;
+        entry.term = static_cast<uint64_t>(proto.term());
+
+        switch (proto.entry_case())
+        {
+            case raft_protos::LogEntry::kData:
+                entry.entry = toBytes(proto.data());
+                break;
+            case raft_protos::LogEntry::kNoOp:
+                entry.entry = NoOp {};
+                break;
+            case raft_protos::LogEntry::ENTRY_NOT_SET:
+                entry.entry = NoOp {};
+                break;
+        }
+
+        return entry;
     }
 
     inline raft_protos::AppendEntriesRequest toProto(const AppendEntriesRequest& request)
