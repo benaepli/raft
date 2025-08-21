@@ -37,62 +37,12 @@ changes.
 
 ### Core Interface
 
-The primary interface is the Server class.
-
-```cpp
-    /// The Raft server interface. This is the main interface for the Raft server. All functions are
-    /// thread-safe.
-    class Server : public ServiceHandler
-    {
-      public:
-        /// Starts Raft consensus.
-        virtual tl::expected<void, Error> start() = 0;
-        /// Shuts down the Raft server.
-        virtual void shutdown() = 0;
-
-        /// Returns the ID of the last-known leader.
-        /// @return The leader's ID or UnknownLeader if no leader is known.
-        [[nodiscard]] virtual tl::expected<std::string, Error> getLeaderID() const = 0;
-
-        /// If the server is the leader, appends an entry to the log. Otherwise, returns a NotLeader
-        /// error. Note that this will not wait for the entry to be committed. An appended entry is
-        /// guaranteed to eventually be committed if leadership is not lost.
-        /// @param data The data to append to the log.
-        /// @return Information about the appended entry or an error.
-        virtual tl::expected<EntryInfo, Error> append(std::vector<std::byte> data) = 0;
-
-        /// Sets the commit callback, which runs when a log entry is committed.
-        /// The callback may be called on a different thread.
-        /// @param callback The callback function to set.
-        virtual void setCommitCallback(CommitCallback callback) = 0;
-
-        /// Sets the leader changed callback, which runs when the leader changes.
-        /// The callback may be called on a different thread.
-        /// @param callback The callback function to set.
-        virtual void setLeaderChangedCallback(LeaderChangedCallback callback) = 0;
-
-        /// Returns the current term.
-        /// @return The current term if the server has not been shut down.
-        [[nodiscard]] virtual tl::expected<uint64_t, Error> getTerm() const = 0;
-
-        /// Returns the current commit index.
-        /// @return The current commit index if the server has not been shut down.
-        [[nodiscard]] virtual tl::expected<uint64_t, Error> getCommitIndex() const = 0;
-
-        /// Returns the total size of the log in bytes, which may be useful for snapshot strategy.
-        /// @return The total byte count of the log if the server has not been shut down.
-        [[nodiscard]] virtual tl::expected<uint64_t, Error> getLogByteCount() const = 0;
-
-        /// Returns the ID of the server.
-        /// @return The server's ID.
-        [[nodiscard]] virtual std::string getId() const = 0;
-    };
-```
+The primary interface is the [Server](\ref raft::Server) class.
 
 The append method accepts a `std::vector<std::byte>`, meaning clients are responsible for their own data serialization.
 The returned EntryInfo struct provides metadata about the log entry's position.
 
-```cpp
+```c++
 /// Information about a log entry.
 struct EntryInfo {
   uint64_t index; ///< The index of the log entry.
@@ -106,7 +56,7 @@ The network interface is responsible for sending and receiving Raft messages acr
 implementation, it accepts a generic ServiceHandler to which the network forwards requests. This allows the network
 interface to be tested independently of the Raft logic.
 
-```proto
+```protobuf
 // The Raft service is used for communication between Raft replicas.
 service Raft {
   // AppendEntries is invoked by the leader to replicate log entries and
@@ -130,7 +80,7 @@ interface and a new InstallSnapshot RPC.
 
 The proposed API additions are:
 
-```cpp
+```c++
 struct Snapshot {
   uint64_t lastIncludedIndex;
   uint64_t lastIncludedTerm;
@@ -170,12 +120,6 @@ Provides a mechanism to block until an appended entry is committed.
 #### 2. Deduplication
 
 Prevents the same command from being applied more than once in the case of client retries.
-
-- Implementation: Each append request must include a unique client-generated ID. The wrapper maintains a map of recently
-  seen IDs. If an ID is already in the map, the append request is rejected. This map of seen IDs will be persisted along
-  with other Raft state to survive restarts.
-- Optimization: A bloom filter is a potential future optimization for the "seen IDs" map, but a std::unordered_map will
-  be used initially.
 
 #### 3. Automatic Snapshots
 
@@ -337,3 +281,11 @@ shutdown:
 On server startup, we create this work guard, and we destroy it on server shutdown. For tasks that run on external
 threads (like gRPC handlers or persistence callbacks), a temporary `executor_work_guard` is created to ensure the
 `io_context` remains active until control is posted back to the main asio::strand.
+
+## Wrapper Implementation
+
+### Deduplication
+
+The wrapper, instead of deduplicating the stored entries, deduplicates the processing of these entries.
+This is to prevent the wrapper from needing direct access to the internal log or a complex persistence mechanism.
+

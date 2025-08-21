@@ -6,6 +6,7 @@ This is an implementation of the Raft consensus algorithm in C++ that I've been 
 It supports the following features:
 
 - [x] Raft elections
+- [x] Log replication
 - [x] Persistence
 - [x] In-memory network for testing
 - [x] gRPC backend for network communication
@@ -13,7 +14,6 @@ It supports the following features:
 
 And it will support:
 
-- [ ] Log replication (obviously the current priority)
 - [ ] Log compaction/snapshotting
 - [ ] A wrapper that simplifies snapshot management and log appends.
 - [ ] Configuration changes

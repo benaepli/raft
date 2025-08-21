@@ -7,6 +7,7 @@ add_subdirectory(proto)
 
 add_library(raft
     ../include/raft/client.hpp
+    ../include/raft/enhanced/server.hpp
     ../include/raft/errors.hpp
     ../include/raft/fmt/errors.hpp
     ../include/raft/inmemory/manager.hpp
@@ -15,6 +16,7 @@ add_library(raft
     ../include/raft/server.hpp
     src/client.cpp
     src/common/mpsc_queue.hpp
+    src/enhanced/server.cpp
     src/impl/log.cpp
     src/impl/log.hpp
     src/impl/persistence.cpp
