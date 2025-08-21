@@ -24,6 +24,10 @@ This library is designed to be high-throughput. It uses asynchronous networking
 through [Asio](https://think-async.com/Asio/)
 and multithreading to achieve this.
 
+## API Reference
+
+See the [Doxygen reference](https://benaepli.github.io/raft/).
+
 ## Technologies
 
 Here are the main ones:
@@ -40,7 +44,8 @@ In general, this code uses a lot of modern C++ features. I also avoid exceptions
 
 ## Design Philosophy
 
-See [docs/design.md](docs/pages/design.md) for more information.
+The [design document](https://benaepli.github.io/raft/md__2home_2runner_2work_2raft_2raft_2docs_2pages_2design.html)
+outlines the design and implementation strategy for this library.
 
 ## Building
 
@@ -62,5 +67,6 @@ For more detailed information, see [docs/building.md](docs/building.md).
 
 ## Additional Resources
 
-- [Postmortems](docs/pages/bugs/lessons-learned.md): A hopefully fun and instructive list of bugs I've encountered while
+- [Postmortems](https://benaepli.github.io/raft/md__2home_2runner_2work_2raft_2raft_2docs_2pages_2bugs_2lessons-learned.html):
+  A hopefully fun and instructive list of bugs I've encountered while
   writing this library.
