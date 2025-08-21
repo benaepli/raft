@@ -6,7 +6,7 @@ This site contains both high-level project information and the detailed API refe
 
 ### Project Docs
 
-- [Design Philosophy](design.md)
+- [Design Philosophy](\ref design)
 - [Build and Installation Guide](../building.md)
 
 ### API Reference

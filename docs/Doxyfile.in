@@ -9,3 +9,6 @@ RECURSIVE              = YES
 
 # Enable diagram generation if you have Graphviz (dot) installed
 HAVE_DOT               = YES
+
+HTML_EXTRA_STYLESHEET  = @PROJECT_SOURCE_DIR@/docs/doxygen-awesome.css
+HTML_EXTRA_FILES       = @PROJECT_SOURCE_DIR@/docs/doxygen-awesome-darkmode-toggle.js

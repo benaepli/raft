@@ -1,3 +1,5 @@
+\page initialization-race "2025-08-16: Check the Member Declaration Order"
+
 # 2025-08-16: Check the Member Declaration Order
 
 ## TLDR:
