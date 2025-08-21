@@ -293,4 +293,20 @@ This is to prevent the wrapper from needing direct access to the internal log or
 
 We accept two fields along with the entry:
 
-- `clientID`: a unique ID for each 
+- `clientID`: a unique string for each client.
+- `requestID`: a monotonically increasing integer associated with each request.
+
+As the Raft paper suggests, we store the latest request ID that has been processed for each client. Upon receiving a
+new server commit, we first intercept the server's callback in the wrapper before passing it on to the provided
+callback.
+Then, we examine the entry's `requestID` corresponding to its client.
+If the client's `requestID` is greater than the stored `requestID`, then we update our stored `requestID` to
+the request's and proceed with the provided callback.
+Otherwise, the log entry is ignored. We also provide a `clearClient` function that erases the stored information for a
+client.
+
+The map of stored clients and requests must be included into snapshots (hence why we intercept snapshot requests).
+
+Note that this design implies that client requests must be sequential. That is, request A should be guaranteed to be
+committed before request B starts if $A < B$. If this is not the desired behavior, then creating a separate client
+for each parallel operation can accommodate parallel requests at the cost of storage space. 

@@ -1,7 +1,7 @@
 find_package(gRPC REQUIRED)
 find_package(Protobuf REQUIRED)
 
-set(PROTO_FILES raft_protos/raft.proto)
+set(PROTO_FILES raft_protos/raft.proto raft_protos/enhanced.proto)
 
 add_library(raft_protos ${PROTO_FILES})
 target_link_libraries(raft_protos
