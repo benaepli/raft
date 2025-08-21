@@ -24,7 +24,7 @@ namespace raft::enhanced
         commitCallback_.reset();
     }
 
-    tl::expected<void, Error> Server::commit(const RequestInfo& info,
+    tl::expected<void, Error> Server::commit(RequestInfo const& info,
                                              const std::vector<std::byte>& value)
     {
     }

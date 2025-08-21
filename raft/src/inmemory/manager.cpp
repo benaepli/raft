@@ -101,7 +101,7 @@ namespace raft::inmemory
             ~ManagerImpl() override = default;
 
             tl::expected<std::shared_ptr<raft::Network>, Error> createNetwork(
-                const NetworkCreateConfig& config) override
+                NetworkCreateConfig const& config) override
             {
                 return std::make_shared<Network>(config.handler, shared_from_this());
             }

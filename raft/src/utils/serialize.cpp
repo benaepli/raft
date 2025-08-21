@@ -7,7 +7,7 @@
 
 namespace raft::data
 {
-    std::vector<std::byte> serialize(const PersistedState& state)
+    std::vector<std::byte> serialize(PersistedState const& state)
     {
         raft_protos::PersistedState protoState = toProto(state);
         std::string serializedState;

@@ -37,7 +37,7 @@ namespace raft::enhanced
         /// @param info The client and request ID for this request.
         /// @param value The data to commit to the Raft log.
         /// @return The result of the commit operation.
-        tl::expected<void, Error> commit(const RequestInfo& info,
+        tl::expected<void, Error> commit(RequestInfo const& info,
                                          const std::vector<std::byte>& value);
 
         /// Sets the commit callback, which runs when a log entry is committed.
@@ -65,5 +65,5 @@ namespace raft::enhanced
     /// Creates a new enhanced Raft server with the given configuration.
     /// @param config The configuration for the server.
     /// @return A unique pointer to the enhanced server instance or an error.
-    tl::expected<std::unique_ptr<Server>, Error> createServer(const ServerCreateConfig& config);
+    tl::expected<std::unique_ptr<Server>, Error> createServer(ServerCreateConfig const& config);
 }  // namespace raft::enhanced

@@ -63,7 +63,7 @@ struct fmt::formatter<raft::errors::Unknown>
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
     template<typename FormatContext>
-    auto format(const raft::errors::Unknown& err, FormatContext& ctx) const
+    auto format(raft::errors::Unknown const& err, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(), "unknown error: {}", err.message);
     }
@@ -77,7 +77,7 @@ struct fmt::formatter<raft::errors::InvalidArgument>
 
     // The format function defines the output.
     template<typename FormatContext>
-    auto format(const raft::errors::InvalidArgument& err, FormatContext& ctx) const
+    auto format(raft::errors::InvalidArgument const& err, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(), "invalid argument: {}", err.message);
     }
@@ -89,7 +89,7 @@ struct fmt::formatter<T>
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
     template<typename FormatContext>
-    auto format(const T& err, FormatContext& ctx) const
+    auto format(T const& err, FormatContext& ctx) const
     {
         (void)err;
         return fmt::format_to(ctx.out(), "{}", raft::errors::detail::getMessage<T>());

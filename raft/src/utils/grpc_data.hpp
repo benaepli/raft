@@ -18,13 +18,13 @@ namespace raft::data
         return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
     }
 
-    inline raft_protos::LogEntry toProto(const LogEntry& entry)
+    inline raft_protos::LogEntry toProto(LogEntry const& entry)
     {
         raft_protos::LogEntry proto;
         proto.set_term(static_cast<int64_t>(entry.term));
 
         std::visit(
-            [&proto](const auto& entryData)
+            [&proto](auto const& entryData)
             {
                 using T = std::decay_t<decltype(entryData)>;
                 if constexpr (std::is_same_v<T, std::vector<std::byte>>)
@@ -62,14 +62,14 @@ namespace raft::data
         return entry;
     }
 
-    inline raft_protos::AppendEntriesRequest toProto(const AppendEntriesRequest& request)
+    inline raft_protos::AppendEntriesRequest toProto(AppendEntriesRequest const& request)
     {
         raft_protos::AppendEntriesRequest proto;
         proto.set_term(static_cast<int64_t>(request.term));
         proto.set_leader_id(request.leaderID);
         proto.set_prev_log_index(static_cast<int64_t>(request.prevLogIndex));
         proto.set_prev_log_term(static_cast<int64_t>(request.prevLogTerm));
-        for (const auto& entry : request.entries)
+        for (auto const& entry : request.entries)
         {
             *proto.add_entries() = toProto(entry);
         }
@@ -86,14 +86,14 @@ namespace raft::data
             .prevLogTerm = static_cast<uint64_t>(proto.prev_log_term()),
             .leaderCommit = static_cast<uint64_t>(proto.leader_commit()),
         };
-        for (const auto& entry : proto.entries())
+        for (auto const& entry : proto.entries())
         {
             request.entries.push_back(fromProto(entry));
         }
         return request;
     }
 
-    inline raft_protos::AppendEntriesResponse toProto(const AppendEntriesResponse& response)
+    inline raft_protos::AppendEntriesResponse toProto(AppendEntriesResponse const& response)
     {
         raft_protos::AppendEntriesResponse proto;
         proto.set_term(static_cast<int64_t>(response.term));
@@ -109,7 +109,7 @@ namespace raft::data
         };
     }
 
-    inline raft_protos::RequestVoteRequest toProto(const RequestVoteRequest& request)
+    inline raft_protos::RequestVoteRequest toProto(RequestVoteRequest const& request)
     {
         raft_protos::RequestVoteRequest proto;
         proto.set_term(static_cast<int64_t>(request.term));
@@ -129,7 +129,7 @@ namespace raft::data
         };
     }
 
-    inline raft_protos::RequestVoteResponse toProto(const RequestVoteResponse& response)
+    inline raft_protos::RequestVoteResponse toProto(RequestVoteResponse const& response)
     {
         raft_protos::RequestVoteResponse proto;
         proto.set_term(static_cast<int64_t>(response.term));
@@ -145,11 +145,11 @@ namespace raft::data
         };
     }
 
-    inline raft_protos::PersistedState toProto(const PersistedState& state)
+    inline raft_protos::PersistedState toProto(PersistedState const& state)
     {
         raft_protos::PersistedState proto;
         proto.set_term(static_cast<int64_t>(state.term));
-        for (const auto& entry : state.entries)
+        for (auto const& entry : state.entries)
         {
             *proto.add_entries() = toProto(entry);
         }
@@ -165,7 +165,7 @@ namespace raft::data
         PersistedState state {
             .term = static_cast<uint64_t>(proto.term()),
         };
-        for (const auto& entry : proto.entries())
+        for (auto const& entry : proto.entries())
         {
             state.entries.push_back(fromProto(entry));
         }

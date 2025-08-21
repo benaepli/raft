@@ -123,17 +123,17 @@ namespace raft
             void postPersist(std::function<void(tl::expected<void, Error>)> callback) const;
             // postRequestVote issues a RequestVote request to the specified replica.
             void postRequestVote(
-                const ClientInfo& client,
-                const data::RequestVoteRequest& request,
+                ClientInfo const& client,
+                data::RequestVoteRequest const& request,
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
             void postAppendEntries(
-                const std::string& id,
-                const data::AppendEntriesRequest& request,
+                std::string const& id,
+                data::AppendEntriesRequest const& request,
                 std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback);
 
             void onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response);
-            void onAppendEntriesResponse(const std::string& id,
-                                         const data::AppendEntriesRequest& request,
+            void onAppendEntriesResponse(std::string const& id,
+                                         data::AppendEntriesRequest const& request,
                                          tl::expected<data::AppendEntriesResponse, Error> response);
 
             // becomeFollower transitions the server to the Follower state.
@@ -239,7 +239,7 @@ namespace raft
         clientIndices_.clear();
         clientIndices_.reserve(peers.size());
 
-        for (const auto& peer : peers)
+        for (auto const& peer : peers)
         {
             auto client = clientFactory_->createClient(peer.address);
             if (!client)
@@ -299,7 +299,7 @@ namespace raft
         data::PersistedState state {.term = term_, .entries = log_.entries};
         if (std::holds_alternative<FollowerInfo>(state_))
         {
-            const auto& followerInfo = std::get<FollowerInfo>(state_);
+            auto const& followerInfo = std::get<FollowerInfo>(state_);
             state.votedFor = followerInfo.votedFor;
         }
         return state;
@@ -920,7 +920,7 @@ namespace raft
     }
 
     void ServerImpl::postRequestVote(
-        const ClientInfo& client,
+        ClientInfo const& client,
         const data::RequestVoteRequest& request,
         std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
     {
@@ -963,7 +963,7 @@ namespace raft
             return;
         }
 
-        const auto& voteResponse = *response;
+        auto const& voteResponse = *response;
         if (voteResponse.term < term_)
         {
             // We have already moved on to a newer term, so we ignore this response.
@@ -1009,7 +1009,7 @@ namespace raft
             return;
         }
 
-        const auto& voteResponse = *response;
+        auto const& voteResponse = *response;
         if (voteResponse.term < term_)
         {
             // We have already moved on to a newer term, so we ignore this response.
@@ -1079,7 +1079,7 @@ namespace raft
         state_ = LeaderInfo {};
         auto& leaderInfo = std::get<LeaderInfo>(state_);
         leaderInfo.clients.reserve(clients_.size());
-        for (const auto& client : clients_)
+        for (auto const& client : clients_)
         {
             leaderInfo.clients.emplace(std::pair {client.id,
                                                   LeaderClientInfo {
@@ -1111,7 +1111,7 @@ namespace raft
             }
 
             int majorityCount = 1;  // Leader itself.
-            for (const auto& [id, clientInfo] : leaderInfo->clients)
+            for (auto const& [id, clientInfo] : leaderInfo->clients)
             {
                 if (clientInfo.matchIndex >= n)
                 {

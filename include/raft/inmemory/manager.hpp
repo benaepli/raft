@@ -30,18 +30,18 @@ namespace raft::inmemory
         /// @param config Configuration containing the service handler for processing requests
         /// @return A shared pointer to the network instance or an error if creation fails
         virtual tl::expected<std::shared_ptr<Network>, Error> createNetwork(
-            const NetworkCreateConfig& config) = 0;
+            NetworkCreateConfig const& config) = 0;
 
         virtual tl::expected<std::shared_ptr<ClientFactory>, Error> createClientFactory(
-            const std::string& clientAddress) = 0;
+            std::string const& clientAddress) = 0;
 
         /// Detaches a network from the in-memory fabric, preventing it
         /// from sending or receiving messages.
         /// @param address The address of the node to detach or an error
-        virtual tl::expected<void, Error> detachNetwork(const std::string& address) = 0;
+        virtual tl::expected<void, Error> detachNetwork(std::string const& address) = 0;
         /// Re-attaches a previously detached network node, restoring communication.
         /// @param address The address of the node to attach.
-        virtual tl::expected<void, Error> attachNetwork(const std::string& address) = 0;
+        virtual tl::expected<void, Error> attachNetwork(std::string const& address) = 0;
     };
 
     /// Creates a new Manager instance for in-memory Raft operations.

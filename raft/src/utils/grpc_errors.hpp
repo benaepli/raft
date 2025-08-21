@@ -38,30 +38,30 @@ namespace raft::errors
     }
 
     // This attempts to match an error to a gRPC status code.
-    inline grpc::Status toGrpcStatus(const Error& error)
+    inline grpc::Status toGrpcStatus(Error const& error)
     {
         return std::visit(
             overloaded {
-                [](const Unknown& e) { return grpc::Status(grpc::StatusCode::UNKNOWN, e.message); },
-                [](const Timeout&)
+                [](Unknown const& e) { return grpc::Status(grpc::StatusCode::UNKNOWN, e.message); },
+                [](Timeout const&)
                 { return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Timeout occurred"); },
-                [](const Unimplemented&)
+                [](Unimplemented const&)
                 { return grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Not implemented"); },
-                [](const InvalidArgument& e)
+                [](InvalidArgument const& e)
                 { return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, e.message); },
-                [](const NotLeader&)
+                [](NotLeader const&)
                 { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Not leader"); },
-                [](const AlreadyRunning&)
+                [](AlreadyRunning const&)
                 { return grpc::Status(grpc::StatusCode::ALREADY_EXISTS, "Already running"); },
-                [](const NotRunning&)
+                [](NotRunning const&)
                 { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Not running"); },
-                [](const FailedToStart&)
+                [](FailedToStart const&)
                 { return grpc::Status(grpc::StatusCode::INTERNAL, "Failed to start"); },
-                [](const Deserialization&)
+                [](Deserialization const&)
                 { return grpc::Status(grpc::StatusCode::DATA_LOSS, "Deserialization failed"); },
-                [](const UnknownLeader&)
+                [](UnknownLeader const&)
                 { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Unknown leader"); },
-                [](const NonexistentNetwork&)
+                [](NonexistentNetwork const&)
                 { return grpc::Status(grpc::StatusCode::NOT_FOUND, "Network does not exist"); }},
             error);
     }

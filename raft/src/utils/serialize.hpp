@@ -17,6 +17,6 @@ namespace raft::data  // namespace raft::data
         std::optional<std::string> votedFor;
     };
 
-    std::vector<std::byte> serialize(const PersistedState& state);
+    std::vector<std::byte> serialize(PersistedState const& state);
     tl::expected<PersistedState, Error> deserialize(std::vector<std::byte> data);
 }  // namespace raft::data

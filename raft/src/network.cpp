@@ -136,7 +136,7 @@ namespace raft
         };
     }  // namespace
 
-    tl::expected<std::shared_ptr<Network>, Error> createNetwork(const NetworkCreateConfig& config)
+    tl::expected<std::shared_ptr<Network>, Error> createNetwork(NetworkCreateConfig const& config)
     {
         return std::make_shared<GrpcNetwork>(*config.handler);
     }

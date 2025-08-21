@@ -21,7 +21,7 @@ namespace raft
         /// NoOp is an empty struct that denotes a no-op log entry.
         struct NoOp
         {
-            bool operator==(const NoOp& other) const = default;
+            bool operator==(NoOp const& other) const = default;
         };
 
         /// LogEntry represents a single log entry in the Raft log.
@@ -30,7 +30,7 @@ namespace raft
             uint64_t term;  ///< The term of the log entry.
             std::variant<std::vector<std::byte>, NoOp> entry;  ///< The entry data or no-op.
 
-            bool operator==(const LogEntry& other) const = default;
+            bool operator==(LogEntry const& other) const = default;
         };
 
         /// The request message for AppendEntries.
@@ -45,7 +45,7 @@ namespace raft
                 entries;  ///< The log entries to store. This may be empty for a heartbeat.
             uint64_t leaderCommit;  ///< The leader's commit index.
 
-            bool operator==(const AppendEntriesRequest& other) const = default;
+            bool operator==(AppendEntriesRequest const& other) const = default;
         };
 
         /// The reply message for AppendEntries.
@@ -55,7 +55,7 @@ namespace raft
             bool success;  ///< True if the follower contained the entry matching prevLogIndex and
                            ///< prevLogTerm.
 
-            bool operator==(const AppendEntriesResponse& other) const = default;
+            bool operator==(AppendEntriesResponse const& other) const = default;
         };
 
         /// The request message for RequestVote.
@@ -66,7 +66,7 @@ namespace raft
             uint64_t lastLogIndex;  ///< The index of the candidate's last log entry.
             uint64_t lastLogTerm;  ///< The term of the candidate's last log entry.
 
-            bool operator==(const RequestVoteRequest& other) const = default;
+            bool operator==(RequestVoteRequest const& other) const = default;
         };
 
         /// The reply message for RequestVote.
@@ -75,7 +75,7 @@ namespace raft
             uint64_t term;  ///< The current term.
             bool voteGranted;  ///< True if the candidate received a vote.
 
-            bool operator==(const RequestVoteResponse& other) const = default;
+            bool operator==(RequestVoteResponse const& other) const = default;
         };
     }  // namespace data
 
@@ -115,7 +115,7 @@ namespace raft
     /// This uses gRPC to connect to the server.
     /// @param address The address to connect to in "host:port" format.
     /// @return A unique pointer to the client or an error.
-    tl::expected<std::unique_ptr<Client>, Error> createClient(const std::string& address);
+    tl::expected<std::unique_ptr<Client>, Error> createClient(std::string const& address);
 
     /// Abstract factory interface for creating Raft clients.
     /// Implementations of this interface provide a way to create Client instances
@@ -129,7 +129,7 @@ namespace raft
         /// @param address The address to connect to in "host:port" format.
         /// @return A unique pointer to the client or an error if creation fails.
         virtual tl::expected<std::unique_ptr<Client>, Error> createClient(
-            const std::string& address) = 0;
+            std::string const& address) = 0;
     };
 
     /// Creates a default ClientFactory implementation that uses gRPC for communication.

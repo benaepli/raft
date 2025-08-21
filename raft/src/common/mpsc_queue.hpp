@@ -13,9 +13,9 @@ namespace raft::common
       public:
         MPSCQueue() = default;
 
-        MPSCQueue(const MPSCQueue&) = delete;
+        MPSCQueue(MPSCQueue const&) = delete;
 
-        MPSCQueue& operator=(const MPSCQueue&) = delete;
+        MPSCQueue& operator=(MPSCQueue const&) = delete;
 
         void push(T value)
         {

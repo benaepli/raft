@@ -19,7 +19,7 @@ namespace raft
         /// "127.0.0.1:8080" for localhost on port 8080 or "127.0.0.1:0" to listen on any available
         /// port.
         /// @return The address of the server
-        virtual tl::expected<std::string, Error> start(const std::string& address) = 0;
+        virtual tl::expected<std::string, Error> start(std::string const& address) = 0;
 
         /// Stops the Raft server.
         /// @return Success or an error.
@@ -35,5 +35,5 @@ namespace raft
     /// Internally, this uses gRPC.
     /// @param config The configuration for the network.
     /// @return A shared pointer to the network or an error.
-    tl::expected<std::shared_ptr<Network>, Error> createNetwork(const NetworkCreateConfig& config);
+    tl::expected<std::shared_ptr<Network>, Error> createNetwork(NetworkCreateConfig const& config);
 }  // namespace raft

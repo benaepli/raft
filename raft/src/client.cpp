@@ -114,7 +114,7 @@ namespace raft
             }
 
           private:
-            static void configureContext(grpc::ClientContext& context, const RequestConfig& config)
+            static void configureContext(grpc::ClientContext& context, RequestConfig const& config)
             {
                 auto deadline =
                     std::chrono::system_clock::now() + std::chrono::milliseconds(config.timeout);

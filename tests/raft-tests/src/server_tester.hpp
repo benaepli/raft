@@ -18,7 +18,7 @@ namespace raft::testing
     inline std::vector<Peer> getPeers(std::vector<std::string> ids, std::string current)
     {
         auto peers = std::vector<raft::Peer>();
-        for (const auto& id : ids)
+        for (auto const& id : ids)
         {
             if (id != current)
             {
@@ -44,7 +44,7 @@ namespace raft::testing
         explicit ServerTester(std::vector<std::string> ids, std::shared_ptr<Persister> persister)
         {
             manager = raft::inmemory::createManager();
-            for (const auto& id : ids)
+            for (auto const& id : ids)
             {
                 auto clientFactoryResult = manager->createClientFactory(id);
                 EXPECT_TRUE(clientFactoryResult.has_value());
@@ -70,7 +70,7 @@ namespace raft::testing
                     ServerAndNetwork {.id = id, .server = server, .network = network});
             }
 
-            for (const auto& server : servers)
+            for (auto const& server : servers)
             {
                 auto startResult = server.server->start();
                 EXPECT_TRUE(startResult.has_value());
@@ -92,7 +92,7 @@ namespace raft::testing
             while (std::chrono::steady_clock::now() < start + ELECTION_WAIT_PERIOD)
             {
                 std::map<uint64_t, std::string> termToLeader;
-                for (const auto& server : servers)
+                for (auto const& server : servers)
                 {
                     auto status = server.server->getStatus();
                     if (!status.has_value())
@@ -122,7 +122,7 @@ namespace raft::testing
                 uint64_t leaderTerm = it->first;
                 std::string leaderID = it->second;
                 uint64_t termAgreementCount = 0;
-                for (const auto& server : servers)
+                for (auto const& server : servers)
                 {
                     auto status = server.server->getStatus();
                     if (!status.has_value())
