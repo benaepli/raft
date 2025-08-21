@@ -1,5 +1,9 @@
 #pragma once
 
+#include <chrono>
+#include <memory>
+
+#include "raft/errors.hpp"
 #include "raft/network.hpp"
 #include "raft/server.hpp"
 
@@ -10,6 +14,7 @@ namespace raft::enhanced
     {
         std::shared_ptr<raft::Network> network;  ///< The network interface for Raft communication.
         std::shared_ptr<raft::Server> server;  ///< The underlying Raft server instance.
+        std::chrono::nanoseconds commitTimeout = std::chrono::seconds(5);  ///< The commit timeout.
         std::optional<CommitCallback> commitCallback;  ///< The commit callback to use.
     };
 
@@ -31,6 +36,12 @@ namespace raft::enhanced
     {
       public:
         explicit Server(ServerCreateConfig config);
+        ~Server();
+
+        Server(Server const&) = delete;
+        Server& operator=(Server const&) = delete;
+        Server(Server&&) noexcept;
+        Server& operator=(Server&&) noexcept;
 
         /// Commits data to the Raft log and waits for it to be applied.
         /// Provides request-response semantics with automatic deduplication.
@@ -53,13 +64,8 @@ namespace raft::enhanced
         void clearClient(std::string const& clientID);
 
       private:
-        void onCommit(EntryInfo info, std::vector<std::byte> data);
-
-        std::shared_ptr<raft::Server> server_;
-        std::shared_ptr<raft::Network> network_;
-        std::optional<CommitCallback> commitCallback_;
-
-        std::unordered_map<std::string, uint64_t> lastRequest_;  // clientID -> requestID
+        class Impl;
+        std::unique_ptr<Impl> pImpl_;
     };
 
     /// Creates a new enhanced Raft server with the given configuration.

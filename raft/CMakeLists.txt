@@ -10,12 +10,15 @@ add_library(raft
     ../include/raft/enhanced/server.hpp
     ../include/raft/errors.hpp
     ../include/raft/fmt/errors.hpp
+    ../include/raft/impl/hash.h
     ../include/raft/inmemory/manager.hpp
     ../include/raft/network.hpp
     ../include/raft/persister.hpp
     ../include/raft/server.hpp
     src/client.cpp
     src/common/mpsc_queue.hpp
+    src/enhanced/serialize.cpp
+    src/enhanced/serialize.hpp
     src/enhanced/server.cpp
     src/impl/log.cpp
     src/impl/log.hpp

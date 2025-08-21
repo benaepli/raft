@@ -3,6 +3,7 @@
 #include <optional>
 #include <random>
 
+#include "impl/hash.h"
 #include "raft/client.hpp"
 #include "raft/persister.hpp"
 
@@ -32,6 +33,8 @@ namespace raft
     {
         uint64_t index;  ///< The index of the log entry.
         uint64_t term;  ///< The term of the log entry.
+
+        bool operator==(EntryInfo const& other) const = default;
     };
 
     /// The callback for when a log entry is committed. It accepts the committed data.
@@ -166,3 +169,18 @@ namespace raft
     /// @return A shared pointer to the server or an error.
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config);
 }  // namespace raft
+
+namespace std
+{
+    template<>
+    struct hash<raft::EntryInfo>
+    {
+        std::size_t operator()(const raft::EntryInfo& e) const noexcept
+        {
+            std::size_t seed = std::hash<uint64_t> {}(e.index);
+            raft::impl::hashCombine(seed, e.term);
+
+            return seed;
+        }
+    };
+}  // namespace std
