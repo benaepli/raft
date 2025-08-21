@@ -44,7 +44,7 @@ In general, this code uses a lot of modern C++ features. I also avoid exceptions
 
 ## Design Philosophy
 
-The [design document](https://benaepli.github.io/raft/md__2home_2runner_2work_2raft_2raft_2docs_2pages_2design.html)
+The [design document](https://benaepli.github.io/raft/design.html)
 outlines the design and implementation strategy for this library.
 
 ## Building
@@ -67,6 +67,6 @@ For more detailed information, see [docs/building.md](docs/building.md).
 
 ## Additional Resources
 
-- [Postmortems](https://benaepli.github.io/raft/md__2home_2runner_2work_2raft_2raft_2docs_2pages_2bugs_2lessons-learned.html):
+- [Postmortems](https://benaepli.github.io/raft/lessons-learned.html):
   A hopefully fun and instructive list of bugs I've encountered while
   writing this library.
