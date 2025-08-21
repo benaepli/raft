@@ -3,7 +3,7 @@ find_package(Doxygen)
 if (DOXYGEN_FOUND)
     set(DOXYGEN_OUTPUT_DIR ${CMAKE_BINARY_DIR}/docs)
     configure_file(
-            ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in
+            Doxyfile.in
             ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
             @ONLY
     )

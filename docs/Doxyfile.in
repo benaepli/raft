@@ -2,8 +2,7 @@ PROJECT_NAME           = "@PROJECT_NAME@"
 PROJECT_NUMBER         = "@PROJECT_VERSION@"
 OUTPUT_DIRECTORY       = "@DOXYGEN_OUTPUT_DIR@"
 
-INPUT                  =  "@PROJECT_SOURCE_DIR@/doxygen/pages" \
-                          "@PROJECT_SOURCE_DIR@/docs" \
+INPUT                  =  "@PROJECT_SOURCE_DIR@/docs" \
                           "@PROJECT_SOURCE_DIR@/include"
 
 RECURSIVE              = YES

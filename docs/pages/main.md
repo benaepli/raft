@@ -6,8 +6,8 @@ This site contains both high-level project information and the detailed API refe
 
 ### Project Docs
 
-- [Design Philosophy](../../docs/design.md)
-- [Build and Installation Guide](../../docs/building.md)
+- [Design Philosophy](design.md)
+- [Build and Installation Guide](../building.md)
 
 ### API Reference
 

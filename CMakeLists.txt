@@ -23,5 +23,5 @@ if (BUILD_TESTS)
 endif ()
 
 if (BUILD_DOCS)
-    add_subdirectory(doxygen)
+    add_subdirectory(docs)
 endif ()

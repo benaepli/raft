@@ -40,7 +40,7 @@ In general, this code uses a lot of modern C++ features. I also avoid exceptions
 
 ## Design Philosophy
 
-See [docs/design.md](docs/design.md) for more information.
+See [docs/design.md](docs/pages/design.md) for more information.
 
 ## Building
 
@@ -62,5 +62,5 @@ For more detailed information, see [docs/building.md](docs/building.md).
 
 ## Additional Resources
 
-- [Postmortems](docs/bugs/lessons-learned.md): A hopefully fun and instructive list of bugs I've encountered while
+- [Postmortems](docs/pages/bugs/lessons-learned.md): A hopefully fun and instructive list of bugs I've encountered while
   writing this library.

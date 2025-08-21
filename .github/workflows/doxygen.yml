@@ -33,9 +33,13 @@ jobs:
         pip install conan
         conan profile detect --force
         
+    - name: Install Conan dependencies
+      run: |
+        conan install . --build=missing -s build_type=Release
+        
     - name: Configure CMake
       run: |
-        cmake --preset=default
+        cmake --preset=ci
         
     - name: Build Doxygen documentation
       run: |
