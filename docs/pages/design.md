@@ -284,8 +284,13 @@ threads (like gRPC handlers or persistence callbacks), a temporary `executor_wor
 
 ## Wrapper Implementation
 
+See [Wrapper](\ref wrapper) for the API reference.
+
 ### Deduplication
 
-The wrapper, instead of deduplicating the stored entries, deduplicates the processing of these entries.
+The wrapper, instead of deduplicating stored entries, deduplicates the processing of these entries.
 This is to prevent the wrapper from needing direct access to the internal log or a complex persistence mechanism.
 
+We accept two fields along with the entry:
+
+- `clientID`: a unique ID for each 
