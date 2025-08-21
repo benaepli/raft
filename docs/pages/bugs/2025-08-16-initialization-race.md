@@ -33,7 +33,7 @@ I quickly noticed a few things:
 3. Both the thread sanitizer and the address sanitizer did not report any errors.
 
 I assumed that I had caused a deadlock somewhere. To verify this, I paused the debugger and encountered this:
-![debugger](assets/initialization-race-debugger.png)
+![debugger](initialization-race-debugger.png)
 
 Where `getStatus` was the following block (simplified):
 
@@ -82,7 +82,7 @@ after
 the execution of a callback within the persister. Additionally, our persister wasn't deadlocking, since I could easily
 see the number of persister callbacks increasing (but not
 decreasing).
-![side-by-side](assets/initialization-race-side-by-side.png)
+![side-by-side](initialization-race-side-by-side.png)
 *Right: the persister after a second more of execution. Clearly not a deadlock.*
 
 So what was causing (2)?
