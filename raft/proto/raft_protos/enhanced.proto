@@ -11,7 +11,7 @@ message Entry {
   // The client ID for this log entry.
   string client_id = 1;
   // The request ID for this log entry.
-  string request_id = 2;
+  int64 request_id = 2;
   // The data contained in the log entry.
   bytes data = 3;
 }
