@@ -51,8 +51,13 @@ namespace raft::enhanced
     class ServerImpl;
 
     /// Enhanced Raft server providing high-level functionality on top of the core Raft
-    /// implementation. This wrapper provides commit management, deduplication, and simplified
-    /// callback management. All functions are thread-safe.
+    /// implementation.
+    ///
+    /// This wrapper provides commit management, deduplication, and simplified
+    /// callback management. All functions are thread-safe. Callbacks are queued and executed
+    /// in a serialized fashion, so it is important to keep callbacks lightweight. Since
+    /// this class maintains a separate queue, it may be inconsistent with the underlying
+    /// server instance.
     class Server
     {
       public:

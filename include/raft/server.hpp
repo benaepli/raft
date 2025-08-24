@@ -104,8 +104,10 @@ namespace raft
         uint64_t logByteCount;  ///< The total size of the log in bytes.
     };
 
-    /// The Raft server interface. This is the main interface for the Raft server. All functions are
-    /// thread-safe.
+    /// The Raft server interface. This is the main interface for the Raft server.
+    ///
+    /// All functions are thread-safe. However, callbacks may block the main Raft logic.
+    /// Therefore, user callbacks should be lightweight and non-blocking.
     class Server : public ServiceHandler
     {
       public:
