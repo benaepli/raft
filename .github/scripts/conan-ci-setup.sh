@@ -8,7 +8,7 @@ pip3 install conan
 
 conan profile detect -f
 
-std=20
+std=17 # note: we are using c++ 20, but conan only publicly caches c++17. both are abi compatible.
 profile="$(conan profile path default)"
 
 mv "$profile" "${profile}.bak"

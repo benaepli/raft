@@ -303,9 +303,9 @@ new server commit, we first intercept the server's callback in the wrapper befor
 callback.
 Then, we examine the entry's `requestID` corresponding to its client.
 If the client's `requestID` is greater than the stored `requestID`, then we update our stored `requestID` to
-the request's and proceed with the provided callback.
-Otherwise, the log entry is ignored. We also provide a `clearClient` function that erases the stored information for a
-client.
+the request's and proceed with the provided callbacks with a false duplication flag.
+Otherwise, the callbacks are invoked with the duplicate flag. We also provide a `clearClient` function that erases
+the stored information for a client.
 
 The map of stored clients and requests must be included into snapshots (hence why we intercept snapshot requests).
 
