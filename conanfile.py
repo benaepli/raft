@@ -10,6 +10,7 @@ class RaftConan(ConanFile):
         self.requires("grpc/1.72.0")
         self.requires("gtest/1.14.0")
         self.requires("spdlog/1.15.3")
+        self.requires("sqlitecpp/3.3.2")
         self.requires("tl-expected/1.1.0")
 
     def layout(self):

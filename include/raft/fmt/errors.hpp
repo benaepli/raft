@@ -83,6 +83,20 @@ struct fmt::formatter<raft::errors::InvalidArgument>
     }
 };
 
+template<>
+struct fmt::formatter<raft::errors::PersistenceFailed>
+{
+    // No format specifiers needed, so the parse function is simple.
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    // The format function defines the output.
+    template<typename FormatContext>
+    auto format(raft::errors::PersistenceFailed const& err, FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "persistence failed: {}", err.message);
+    }
+};
+
 template<raft::errors::detail::SimpleError T>
 struct fmt::formatter<T>
 {

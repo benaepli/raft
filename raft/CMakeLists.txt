@@ -1,6 +1,7 @@
 find_package(asio REQUIRED)
 find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(SQLiteCpp REQUIRED)
 find_package(tl-expected REQUIRED)
 
 add_subdirectory(proto)
@@ -11,6 +12,7 @@ add_library(raft
     ../include/raft/enhanced/typed_server.hpp
     ../include/raft/errors.hpp
     ../include/raft/fmt/errors.hpp
+    ../include/raft/fs/sqlite.hpp
     ../include/raft/impl/hash.h
     ../include/raft/inmemory/manager.hpp
     ../include/raft/network.hpp
@@ -21,6 +23,7 @@ add_library(raft
     src/enhanced/serialize.cpp
     src/enhanced/serialize.hpp
     src/enhanced/server.cpp
+    src/fs/sqlite.cpp
     src/impl/log.cpp
     src/impl/log.hpp
     src/impl/persistence.cpp
@@ -37,7 +40,7 @@ add_library(raft
 )
 
 target_link_libraries(raft PUBLIC tl::expected)
-target_link_libraries(raft PRIVATE raft_protos spdlog::spdlog fmt::fmt asio::asio)
+target_link_libraries(raft PRIVATE raft_protos spdlog::spdlog fmt::fmt asio::asio SQLiteCpp)
 
 # Set up include directories
 target_include_directories(raft

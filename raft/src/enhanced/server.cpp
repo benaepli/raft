@@ -1,3 +1,4 @@
+#include <ranges>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
@@ -39,12 +40,18 @@ namespace raft::enhanced
             , commitTimeout_(config.commitTimeout)
             , globalCommitCallback_(config.commitCallback)
         {
-            if (server_)
-            {
-                server_->setCommitCallback(
-                    [this](EntryInfo info, std::vector<std::byte> data)
-                    { asio::post(callbackStrand_, [this, info, data] { onCommit(info, data); }); });
-            }
+            server_->setCommitCallback(
+                [this](EntryInfo info, std::vector<std::byte> data)
+                { asio::post(callbackStrand_, [this, info, data] { onCommit(info, data); }); });
+
+            server_->setLeaderChangedCallback(
+                [this](const std::optional<Peer>&, bool, bool lostLeadership)
+                {
+                    if (lostLeadership)
+                    {
+                        asio::post(callbackStrand_, [this] { onLostLeadership(); });
+                    }
+                });
         }
 
         ~ServerImpl() { threadPool_.join(); }
@@ -92,30 +99,6 @@ namespace raft::enhanced
                            handlers_[*appendResult] = localHandler;
                            indexToInfo_[appendResult->index].emplace(*appendResult);
                        });
-        }
-
-        void onCommit(EntryInfo info, std::vector<std::byte> data)
-        {
-            auto deserialized = deserialize(data);
-            if (!deserialized)
-            {
-                dispatchCommit(info, std::move(data), /*duplicate=*/false);
-                spdlog::info(
-                    "enhanced server [{}] received entry that does not have deduplication info",
-                    server_->getId());
-                return;
-            }
-            auto lastRequest = lastRequest_.find(deserialized->clientID);
-            if (lastRequest != lastRequest_.end())
-            {
-                if (lastRequest->second >= deserialized->requestID)
-                {
-                    dispatchCommit(info, std::move(data), /*duplicate=*/true);
-                    return;
-                }
-            }
-            lastRequest_[deserialized->clientID] = deserialized->requestID;
-            dispatchCommit(info, deserialized->data, /*duplicate=*/false);
         }
 
         void clearClient(std::string const& clientID)
@@ -170,6 +153,38 @@ namespace raft::enhanced
             if (globalCommitCallback_)
             {
                 globalCommitCallback_->operator()(data, found, duplicate);
+            }
+        }
+
+        void onCommit(EntryInfo info, std::vector<std::byte> data)
+        {
+            auto deserialized = deserialize(data);
+            if (!deserialized)
+            {
+                dispatchCommit(info, std::move(data), /*duplicate=*/false);
+                spdlog::info(
+                    "enhanced server [{}] received entry that does not have deduplication info",
+                    server_->getId());
+                return;
+            }
+            auto lastRequest = lastRequest_.find(deserialized->clientID);
+            if (lastRequest != lastRequest_.end())
+            {
+                if (lastRequest->second >= deserialized->requestID)
+                {
+                    dispatchCommit(info, std::move(data), /*duplicate=*/true);
+                    return;
+                }
+            }
+            lastRequest_[deserialized->clientID] = deserialized->requestID;
+            dispatchCommit(info, deserialized->data, /*duplicate=*/false);
+        }
+
+        void onLostLeadership()
+        {
+            for (auto& handler : handlers_ | std::ranges::views::values)
+            {
+                handler->operator()(errors::NotLeader());
             }
         }
 

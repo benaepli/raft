@@ -11,11 +11,11 @@ It supports the following features:
 - [x] In-memory network for testing
 - [x] gRPC backend for network communication
 - [x] A client interface for submitting log entries
+- [x] A wrapper that simplifies snapshot management, log appends, and optionally greater type-safety.
 
 And it will support:
 
 - [ ] Log compaction/snapshotting
-- [ ] A wrapper that simplifies snapshot management and log appends.
 - [ ] Configuration changes
 - [ ] A configuration format for both testing and production use
 - [ ] A CLI demo with a linearizable key-value store

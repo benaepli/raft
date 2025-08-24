@@ -42,20 +42,22 @@ namespace raft
     /// @param data The committed data.
     using CommitCallback = std::function<void(EntryInfo, std::vector<std::byte>)>;
 
-    /**
-     * The callback when the server's known leader changes.
-     * @param leaderID The ID of the new leader, or std::nullopt if there is no leader.
-     * @param isLeader Whether this server is the new leader.
-     * @param lostLeadership If this server was the previous leader, this will be true.
-     */
-    using LeaderChangedCallback = std::function<void(std::optional<std::string>, bool, bool)>;
-
     /// A peer in the Raft cluster.
     struct Peer
     {
-        std::string id;
-        std::string address;
+        std::string id;  ///< The ID of the peer.
+        std::string address;  ///< The address of the peer. If this is the current server, this will
+                              ///< be "self".
     };
+
+    /**
+     * The callback when the server's known leader changes.
+     * @param leader The peer information of the new leader, or std::nullopt if there is no leader.
+     * @param isLeader Whether this server is the new leader.
+     * @param lostLeadership If this server was the previous leader, this will be true.
+     */
+    using LeaderChangedCallback =
+        std::function<void(std::optional<Peer> leader, bool isLeader, bool lostLeadership)>;
 
     /// Configuration for creating a Raft server.
     struct ServerCreateConfig
@@ -97,8 +99,8 @@ namespace raft
     struct Status
     {
         bool isLeader;  ///< Whether this server is currently the leader.
-        std::optional<std::string>
-            leaderID;  ///< The ID of the current leader, or std::nullopt if unknown.
+        std::optional<Peer>
+            leader;  ///< The current leader peer information, or std::nullopt if unknown.
         uint64_t term;  ///< The current term of the server.
         uint64_t commitIndex;  ///< The index of the last committed log entry.
         uint64_t logByteCount;  ///< The total size of the log in bytes.
@@ -116,9 +118,9 @@ namespace raft
         /// Shuts down the Raft server.
         virtual void shutdown() = 0;
 
-        /// Returns the ID of the last-known leader.
-        /// @return The leader's ID or UnknownLeader if no leader is known.
-        [[nodiscard]] virtual tl::expected<std::string, Error> getLeaderID() const = 0;
+        /// Returns the last-known leader.
+        /// @return The leader peer information or UnknownLeader if no leader is known.
+        [[nodiscard]] virtual tl::expected<Peer, Error> getLeader() const = 0;
 
         /// If the server is the leader, appends an entry to the log. Otherwise, returns a NotLeader
         /// error. Note that this will not wait for the entry to be committed. An appended entry is

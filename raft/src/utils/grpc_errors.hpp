@@ -62,7 +62,9 @@ namespace raft::errors
                 [](UnknownLeader const&)
                 { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Unknown leader"); },
                 [](NonexistentNetwork const&)
-                { return grpc::Status(grpc::StatusCode::NOT_FOUND, "Network does not exist"); }},
+                { return grpc::Status(grpc::StatusCode::NOT_FOUND, "Network does not exist"); },
+                [](PersistenceFailed const& e)
+                { return grpc::Status(grpc::StatusCode::DATA_LOSS, e.message); }},
             error);
     }
 }  // namespace raft::errors

@@ -64,6 +64,12 @@ namespace raft
         struct NonexistentNetwork
         {
         };
+
+        /// Persistence operation failed.
+        struct PersistenceFailed
+        {
+            std::string message;  ///< The error message.
+        };
     }  // namespace errors
 
     using Error = std::variant<errors::Unknown,
@@ -76,6 +82,7 @@ namespace raft
                                errors::FailedToStart,
                                errors::Deserialization,
                                errors::UnknownLeader,
-                               errors::NonexistentNetwork>;
+                               errors::NonexistentNetwork,
+                               errors::PersistenceFailed>;
 
 }  // namespace raft

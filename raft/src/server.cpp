@@ -68,7 +68,7 @@ namespace raft
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
                 override;
 
-            [[nodiscard]] tl::expected<std::string, Error> getLeaderID() const override;
+            [[nodiscard]] tl::expected<Peer, Error> getLeader() const override;
 
             tl::expected<EntryInfo, Error> append(std::vector<std::byte> data) override;
 
@@ -92,6 +92,7 @@ namespace raft
 
           private:
             data::PersistedState getPersistedState() const;
+            std::optional<Peer> getLeaderPeer() const;
             bool shutdownCalled() const
             {
                 return lifecycle_ == Lifecycle::Stopped || lifecycle_ == Lifecycle::Stopping;
@@ -112,9 +113,7 @@ namespace raft
                 const data::RequestVoteRequest& request,
                 std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback);
 
-            void invokeLeaderChangedCallback(const std::optional<std::string>& leaderID,
-                                             bool isLeader,
-                                             bool lostLeadership);
+            void invokeLeaderChangedCallback(bool isLeader, bool lostLeadership);
 
             void invokeCommitCallback(uint64_t index);
 
@@ -303,6 +302,34 @@ namespace raft
             state.votedFor = followerInfo.votedFor;
         }
         return state;
+    }
+
+    std::optional<Peer> ServerImpl::getLeaderPeer() const
+    {
+        if (!lastLeaderID_.has_value())
+        {
+            return std::nullopt;
+        }
+
+        std::string leaderID = *lastLeaderID_;
+
+        // If this server is the leader, return its own peer info
+        if (leaderID == id_)
+        {
+            return Peer {.id = id_, .address = "self"};
+        }
+
+        // Find the peer info for the leader
+        auto it = clientIndices_.find(leaderID);
+        if (it != clientIndices_.end())
+        {
+            auto& client = clients_[it->second];
+            return Peer {.id = client.id, .address = client.address};
+        }
+
+        // Fallback if we can't find the peer info
+        spdlog::error("[{}] unknown leader ID: {}", id_, leaderID);
+        return Peer {.id = leaderID, .address = "unknown"};
     }
 
     void ServerImpl::scheduleTimeout()
@@ -539,33 +566,35 @@ namespace raft
         return future.get();
     }
 
-    tl::expected<std::string, Error> ServerImpl::getLeaderID() const
+    tl::expected<Peer, Error> ServerImpl::getLeader() const
     {
         auto guard = work_;
         if (shutdownCalled())
         {
             return tl::make_unexpected(errors::NotRunning {});
         }
-        std::promise<tl::expected<std::optional<std::string>, Error>> promise;
+        std::promise<tl::expected<std::optional<Peer>, Error>> promise;
         auto future = promise.get_future();
-        asio::post(
-            strand_,
-            [this, &promise]
-            {
-                postPersist(
-                    [this, &promise, lastLeaderID = lastLeaderID_](tl::expected<void, Error> result)
-                    {
-                        if (!result)
-                        {
-                            spdlog::error("[{}] failed to persist state before getLeaderID: {}",
-                                          id_,
-                                          result.error());
-                            promise.set_value(tl::make_unexpected(result.error()));
-                            return;
-                        }
-                        promise.set_value(lastLeaderID);
-                    });
-            });
+        asio::post(strand_,
+                   [this, &promise]
+                   {
+                       auto leaderPeer = getLeaderPeer();
+
+                       postPersist(
+                           [this, &promise, leaderPeer](tl::expected<void, Error> result)
+                           {
+                               if (!result)
+                               {
+                                   spdlog::error(
+                                       "[{}] failed to persist state before getLeader: {}",
+                                       id_,
+                                       result.error());
+                                   promise.set_value(tl::make_unexpected(result.error()));
+                                   return;
+                               }
+                               promise.set_value(leaderPeer);
+                           });
+                   });
         auto result = future.get();
         if (!result)
         {
@@ -575,7 +604,7 @@ namespace raft
         {
             return tl::make_unexpected(errors::UnknownLeader {});
         }
-        return result.value().value();
+        return *result.value();
     }
 
     tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
@@ -639,7 +668,7 @@ namespace raft
                    [this, &promise]
                    {
                        Status status {.isLeader = std::holds_alternative<LeaderInfo>(state_),
-                                      .leaderID = lastLeaderID_,
+                                      .leader = getLeaderPeer(),
                                       .term = term_,
                                       .commitIndex = commitIndex_,
                                       .logByteCount = log_.entries.size() * sizeof(data::LogEntry)};
@@ -787,7 +816,7 @@ namespace raft
             lastLeaderID_ = request.leaderID;
             if (previousLeaderID != lastLeaderID_)
             {
-                invokeLeaderChangedCallback(lastLeaderID_, false, lostLeadership);
+                invokeLeaderChangedCallback(false, lostLeadership);
             }
         }
 
@@ -861,12 +890,11 @@ namespace raft
         followerInfo.votedFor = request.candidateID;
     }
 
-    void ServerImpl::invokeLeaderChangedCallback(const std::optional<std::string>& leaderID,
-                                                 bool isLeader,
-                                                 bool lostLeadership)
+    void ServerImpl::invokeLeaderChangedCallback(bool isLeader, bool lostLeadership)
     {
         postPersist(
-            [this, leaderID, isLeader, lostLeadership](tl::expected<void, Error> result)
+            [this, leader = getLeaderPeer(), isLeader, lostLeadership](
+                tl::expected<void, Error> result)
             {
                 if (!result)
                 {
@@ -878,7 +906,7 @@ namespace raft
                 std::lock_guard lock {mutex_};
                 if (leaderChangedCallback_)
                 {
-                    (*leaderChangedCallback_)(leaderID, isLeader, lostLeadership);
+                    (*leaderChangedCallback_)(leader, isLeader, lostLeadership);
                 }
             });
     }
@@ -1090,7 +1118,8 @@ namespace raft
                                                   }});
             scheduleHeartbeatTimeout(client.id);
         }
-        invokeLeaderChangedCallback(id_, true, false);
+        lastLeaderID_ = id_;
+        invokeLeaderChangedCallback(true, false);
         log_.appendNoOp(term_);
     }
 
