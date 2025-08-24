@@ -10,7 +10,7 @@
 #include "raft/server.hpp"
 #include "server_tester.hpp"
 
-using raft::testing::MockPersister;
+using raft::testing::NoOpPersister;
 using raft::testing::ServerTester;
 
 namespace
@@ -26,13 +26,6 @@ namespace
         auto startResult = network.start(id);
         EXPECT_TRUE(startResult.has_value());
     }
-
-    class NoOpPersister : public raft::Persister
-    {
-      public:
-        void saveState(std::vector<std::byte> state) override {}
-        std::optional<std::vector<std::byte>> loadState() override { return std::nullopt; }
-    };
 }  // namespace
 
 TEST(ElectionTest, SimpleLeaderElection)

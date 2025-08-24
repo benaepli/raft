@@ -115,7 +115,7 @@ namespace raft::enhanced
                 }
             }
             lastRequest_[deserialized->clientID] = deserialized->requestID;
-            dispatchCommit(info, std::move(data), /*duplicate=*/false);
+            dispatchCommit(info, deserialized->data, /*duplicate=*/false);
         }
 
         void clearClient(std::string const& clientID)

@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include "raft/fmt/errors.hpp"
 #include "raft/inmemory/manager.hpp"
 #include "raft/network.hpp"
 

@@ -7,6 +7,7 @@ add_executable(raft_tests
         src/impl/persistence.cpp
         src/inmemory/manager.cpp
         src/election.cpp
+        src/enhanced/server.cpp
         src/mocks/persister.hpp
         src/server_tester.hpp
         src/server.cpp
