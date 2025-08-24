@@ -73,7 +73,7 @@ namespace raft::impl
 
     void PersistenceHandler::persist(std::unique_lock<std::mutex>& lock)
     {
-        std::queue<std::function<void()> > requests;
+        std::queue<std::function<void(tl::expected<void, Error>)> > requests;
         requests.swap(callbacks_);
 
         std::vector<std::byte> data;
@@ -81,7 +81,7 @@ namespace raft::impl
 
         lock.unlock();
 
-        persister_->saveState(data);
+        auto result = persister_->saveState(data);
         int counter = 0;
         spdlog::trace("[PersistenceHandler {}] begin persist, request size {}",
                       static_cast<void*>(this),
@@ -89,7 +89,7 @@ namespace raft::impl
         while (!requests.empty())
         {
             auto& callback = requests.front();
-            callback();
+            callback(result);
             requests.pop();
             counter++;
         }

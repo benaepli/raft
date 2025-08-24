@@ -937,12 +937,12 @@ namespace raft
     {
         auto data = data::serialize(getPersistedState());
         // We need the guard to keep the threads alive until the callback is invoked.
-        auto cb = [this, guard = work_, callback = std::move(callback)]
+        auto cb = [this, guard = work_, callback = std::move(callback)](tl::expected<void, Error> result)
         {
             (void)guard;
             // PersistenceHandler may run the callback on a different thread, so we post it back to
             // the strand.
-            asio::post(strand_, [callback] { callback({}); });
+            asio::post(strand_, [callback, result] { callback(result); });
         };
         persistenceHandler_->addRequest(impl::PersistenceRequest {.data = data, .callback = cb});
     }

@@ -17,7 +17,7 @@ namespace raft::impl
     struct PersistenceRequest
     {
         std::vector<std::byte> data;
-        std::function<void()> callback;
+        std::function<void(tl::expected<void, Error>)> callback;
     };
 
     // Handles persistence requests in batches in a separate thread. This calls the Persister's
@@ -47,7 +47,7 @@ namespace raft::impl
         uint64_t maxEntries_;
 
         std::mutex mutex_;
-        std::queue<std::function<void()> > callbacks_;
+        std::queue<std::function<void(tl::expected<void, Error>)> > callbacks_;
         std::vector<std::byte> data_;
         std::condition_variable condition_;
 
