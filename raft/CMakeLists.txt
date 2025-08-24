@@ -8,6 +8,7 @@ add_subdirectory(proto)
 add_library(raft
     ../include/raft/client.hpp
     ../include/raft/enhanced/server.hpp
+    ../include/raft/enhanced/typed_server.hpp
     ../include/raft/errors.hpp
     ../include/raft/fmt/errors.hpp
     ../include/raft/impl/hash.h
