@@ -11,6 +11,7 @@ add_executable(raft_tests
         src/mocks/persister.hpp
         src/server_tester.hpp
         src/server.cpp
+        src/fs/sqlite.cpp
 )
 target_link_libraries(raft_tests PRIVATE GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main raft spdlog::spdlog)
 target_include_directories(raft_tests PRIVATE ${CMAKE_SOURCE_DIR}/raft/src src)

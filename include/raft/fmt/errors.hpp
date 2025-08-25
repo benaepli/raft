@@ -46,6 +46,10 @@ namespace raft::errors::detail
         {
             return "nonexistent network";
         }
+        if constexpr (std::is_same_v<T, NoPersistedState>)
+        {
+            return "no persisted state";
+        }
         return "unknown error";
     }
 
@@ -54,7 +58,7 @@ namespace raft::errors::detail
         || std::is_same_v<T, NotLeader> || std::is_same_v<T, AlreadyRunning>
         || std::is_same_v<T, NotRunning> || std::is_same_v<T, FailedToStart>
         || std::is_same_v<T, Deserialization> || std::is_same_v<T, UnknownLeader>
-        || std::is_same_v<T, NonexistentNetwork>;
+        || std::is_same_v<T, NonexistentNetwork> || std::is_same_v<T, NoPersistedState>;
 }  // namespace raft::errors::detail
 
 template<>

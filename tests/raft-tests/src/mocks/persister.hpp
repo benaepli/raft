@@ -14,13 +14,19 @@ namespace raft::testing
                     saveState,
                     (std::vector<std::byte> state),
                     (noexcept, override));
-        MOCK_METHOD(std::optional<std::vector<std::byte>>, loadState, (), (noexcept, override));
+        MOCK_METHOD((tl::expected<std::vector<std::byte>, Error>), loadState, (), (noexcept, override));
     };
 
     class NoOpPersister : public raft::Persister
     {
       public:
-        tl::expected<void, Error> saveState(std::vector<std::byte> state) override { return {}; }
-        std::optional<std::vector<std::byte>> loadState() noexcept override { return std::nullopt; }
+        tl::expected<void, Error> saveState(std::vector<std::byte> state) noexcept override
+        {
+            return {};
+        }
+        tl::expected<std::vector<std::byte>, Error> loadState() noexcept override 
+        { 
+            return tl::make_unexpected(errors::NoPersistedState{}); 
+        }
     };
 }  // namespace raft::testing

@@ -215,9 +215,10 @@ namespace raft
         {
             return tl::make_unexpected(errors::InvalidArgument {"threadCount must be >= 1"});
         }
-        if (auto result = persister_->loadState(); result.has_value())
+        auto loadResult = persister_->loadState();
+        if (loadResult.has_value())
         {
-            auto state = data::deserialize(*result);
+            auto state = data::deserialize(*loadResult);
             if (!state)
             {
                 return tl::make_unexpected(state.error());
@@ -228,9 +229,13 @@ namespace raft
             };
             log_ = Log {.entries = std::move(state->entries), .baseIndex = 1};
         }
-        else
+        else if (std::holds_alternative<errors::NoPersistedState>(loadResult.error()))
         {
             log_ = Log {.baseIndex = 1};
+        }
+        else
+        {
+            return tl::make_unexpected(loadResult.error());
         }
 
         clients_.clear();

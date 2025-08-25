@@ -63,6 +63,8 @@ namespace raft::errors
                 { return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Unknown leader"); },
                 [](NonexistentNetwork const&)
                 { return grpc::Status(grpc::StatusCode::NOT_FOUND, "Network does not exist"); },
+                [](NoPersistedState const&)
+                { return grpc::Status(grpc::StatusCode::NOT_FOUND, "No persisted state"); },
                 [](PersistenceFailed const& e)
                 { return grpc::Status(grpc::StatusCode::DATA_LOSS, e.message); }},
             error);

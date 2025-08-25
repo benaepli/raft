@@ -65,6 +65,11 @@ namespace raft
         {
         };
 
+        /// No persisted state is available.
+        struct NoPersistedState
+        {
+        };
+
         /// Persistence operation failed.
         struct PersistenceFailed
         {
@@ -83,6 +88,7 @@ namespace raft
                                errors::Deserialization,
                                errors::UnknownLeader,
                                errors::NonexistentNetwork,
+                               errors::NoPersistedState,
                                errors::PersistenceFailed>;
 
 }  // namespace raft
