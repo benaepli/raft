@@ -183,988 +183,1025 @@ namespace raft
 
             RequestConfig requestConfig_ = {};
         };
-    }  // namespace
 
-    ServerImpl::ServerImpl(std::string id,
-                           std::shared_ptr<ClientFactory> clientFactory,
-                           std::shared_ptr<Persister> persister,
-                           std::optional<CommitCallback> commitCallback,
-                           std::optional<LeaderChangedCallback> leaderChangedCallback,
-                           TimeoutInterval timeoutInterval,
-                           uint64_t heartbeatInterval)
-        : work_(io_.get_executor())
-        , id_(std::move(id))
-        , clientFactory_(clientFactory)
-        , persister_(std::move(persister))
-        , commitCallback_(std::move(commitCallback))
-        , leaderChangedCallback_(std::move(leaderChangedCallback))
-        , timeoutInterval_(timeoutInterval.sample(gen_))
-        , heartbeatInterval_(heartbeatInterval)
-        , strand_(io_.get_executor())
-    {
-    }
-
-    ServerImpl::~ServerImpl()
-    {
-        shutdown();
-    }
-
-    tl::expected<void, Error> ServerImpl::init(const std::vector<Peer>& peers, uint16_t threadCount)
-    {
-        if (threadCount < 1)
+        ServerImpl::ServerImpl(std::string id,
+                               std::shared_ptr<ClientFactory> clientFactory,
+                               std::shared_ptr<Persister> persister,
+                               std::optional<CommitCallback> commitCallback,
+                               std::optional<LeaderChangedCallback> leaderChangedCallback,
+                               TimeoutInterval timeoutInterval,
+                               uint64_t heartbeatInterval)
+            : work_(io_.get_executor())
+            , id_(std::move(id))
+            , clientFactory_(clientFactory)
+            , persister_(std::move(persister))
+            , commitCallback_(std::move(commitCallback))
+            , leaderChangedCallback_(std::move(leaderChangedCallback))
+            , timeoutInterval_(timeoutInterval.sample(gen_))
+            , heartbeatInterval_(heartbeatInterval)
+            , strand_(io_.get_executor())
         {
-            return tl::make_unexpected(errors::InvalidArgument {"threadCount must be >= 1"});
         }
-        auto loadResult = persister_->loadState();
-        if (loadResult.has_value())
+
+        ServerImpl::~ServerImpl()
         {
-            auto state = data::deserialize(*loadResult);
-            if (!state)
+            shutdown();
+        }
+
+        tl::expected<void, Error> ServerImpl::init(const std::vector<Peer>& peers,
+                                                   uint16_t threadCount)
+        {
+            if (threadCount < 1)
             {
-                return tl::make_unexpected(state.error());
+                return tl::make_unexpected(errors::InvalidArgument {"threadCount must be >= 1"});
             }
-            term_ = state->term;
-            state_ = FollowerInfo {
-                .votedFor = state->votedFor,
-            };
-            log_ = Log {.entries = std::move(state->entries), .baseIndex = 1};
-        }
-        else if (std::holds_alternative<errors::NoPersistedState>(loadResult.error()))
-        {
-            log_ = Log {.baseIndex = 1};
-        }
-        else
-        {
-            return tl::make_unexpected(loadResult.error());
-        }
-
-        clients_.clear();
-        clients_.reserve(peers.size());
-        clientIndices_.clear();
-        clientIndices_.reserve(peers.size());
-
-        for (auto const& peer : peers)
-        {
-            auto client = clientFactory_->createClient(peer.address);
-            if (!client)
+            auto loadResult = persister_->loadState();
+            if (loadResult.has_value())
             {
-                return tl::make_unexpected(client.error());
+                auto state = data::deserialize(*loadResult);
+                if (!state)
+                {
+                    return tl::make_unexpected(state.error());
+                }
+                term_ = state->term;
+                state_ = FollowerInfo {
+                    .votedFor = state->votedFor,
+                };
+                log_ = Log {.entries = std::move(state->entries), .baseIndex = 1};
             }
-            if (clientIndices_.find(peer.id) != clientIndices_.end())
+            else if (std::holds_alternative<errors::NoPersistedState>(loadResult.error()))
             {
-                return tl::make_unexpected(
-                    errors::InvalidArgument {fmt::format("duplicate peer id: {}", peer.id)});
+                log_ = Log {.baseIndex = 1};
+            }
+            else
+            {
+                return tl::make_unexpected(loadResult.error());
             }
 
-            clientIndices_[peer.id] = clients_.size();
-            clients_.push_back(
-                ClientInfo {.client = std::move(*client), .id = peer.id, .address = peer.address});
-        }
-        // Start the asio threads here, even though Raft consensus has not started yet. This is so
-        // that we can handle simple requests like GetTerm and GetCommitIndex immediately.
-        for (uint16_t i = 0; i < threadCount; i++)
-        {
-            threads_.emplace_back([this] { io_.run(); });
+            clients_.clear();
+            clients_.reserve(peers.size());
+            clientIndices_.clear();
+            clientIndices_.reserve(peers.size());
+
+            for (auto const& peer : peers)
+            {
+                auto client = clientFactory_->createClient(peer.address);
+                if (!client)
+                {
+                    return tl::make_unexpected(client.error());
+                }
+                if (clientIndices_.find(peer.id) != clientIndices_.end())
+                {
+                    return tl::make_unexpected(
+                        errors::InvalidArgument {fmt::format("duplicate peer id: {}", peer.id)});
+                }
+
+                clientIndices_[peer.id] = clients_.size();
+                clients_.push_back(ClientInfo {
+                    .client = std::move(*client), .id = peer.id, .address = peer.address});
+            }
+            // Start the asio threads here, even though Raft consensus has not started yet. This is
+            // so that we can handle simple requests like GetTerm and GetCommitIndex immediately.
+            for (uint16_t i = 0; i < threadCount; i++)
+            {
+                threads_.emplace_back([this] { io_.run(); });
+            }
+
+            return {};
         }
 
-        return {};
-    }
+        void ServerImpl::shutdown()
+        {
+            if (shutdownCalled())
+            {
+                return;
+            }
+            lifecycle_ = Lifecycle::Stopping;
+            if (timer_)
+            {
+                timer_->cancel();
+            }
+            if (std::holds_alternative<LeaderInfo>(state_))
+            {
+                auto& leaderInfo = std::get<LeaderInfo>(state_);
+                for (auto& [_, leaderClientInfo] : leaderInfo.clients)
+                {
+                    leaderClientInfo.heartbeatTimer.cancel();
+                }
+            }
 
-    void ServerImpl::shutdown()
-    {
-        if (shutdownCalled())
-        {
-            return;
+            work_.reset();
+            for (auto& thread : threads_)
+            {
+                thread.join();
+            }
+            lifecycle_ = Lifecycle::Stopped;
         }
-        lifecycle_ = Lifecycle::Stopping;
-        if (timer_)
+
+        data::PersistedState ServerImpl::getPersistedState() const
         {
-            timer_->cancel();
+            data::PersistedState state {.term = term_, .entries = log_.entries};
+            if (std::holds_alternative<FollowerInfo>(state_))
+            {
+                auto const& followerInfo = std::get<FollowerInfo>(state_);
+                state.votedFor = followerInfo.votedFor;
+            }
+            return state;
         }
-        if (std::holds_alternative<LeaderInfo>(state_))
+
+        std::optional<Peer> ServerImpl::getLeaderPeer() const
         {
+            if (!lastLeaderID_.has_value())
+            {
+                return std::nullopt;
+            }
+
+            std::string leaderID = *lastLeaderID_;
+
+            // If this server is the leader, return its own peer info
+            if (leaderID == id_)
+            {
+                return Peer {.id = id_, .address = "self"};
+            }
+
+            // Find the peer info for the leader
+            auto it = clientIndices_.find(leaderID);
+            if (it != clientIndices_.end())
+            {
+                auto& client = clients_[it->second];
+                return Peer {.id = client.id, .address = client.address};
+            }
+
+            // Fallback if we can't find the peer info
+            spdlog::error("[{}] unknown leader ID: {}", id_, leaderID);
+            return Peer {.id = leaderID, .address = "unknown"};
+        }
+
+        void ServerImpl::scheduleTimeout()
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return;
+            }
+            if (!timer_)
+            {
+                timer_ = std::make_unique<asio::steady_timer>(io_);
+            }
+            timer_->expires_from_now(asio::chrono::milliseconds(timeoutInterval_));
+            timer_->async_wait(
+                [this](asio::error_code ec)
+                {
+                    if (ec)
+                    {
+                        return;
+                    }
+                    asio::post(strand_, [this] { processTimeout(); });
+                });
+        }
+
+        void ServerImpl::scheduleHeartbeatTimeout(const std::string& id)
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return;
+            }
+            if (!std::holds_alternative<LeaderInfo>(state_))
+            {
+                return;
+            }
             auto& leaderInfo = std::get<LeaderInfo>(state_);
-            for (auto& [_, leaderClientInfo] : leaderInfo.clients)
+            auto it = leaderInfo.clients.find(id);
+            if (it == leaderInfo.clients.end())
             {
-                leaderClientInfo.heartbeatTimer.cancel();
+                spdlog::error("[{}] unknown client ID: {}", id_, id);
+                return;
             }
-        }
-
-        work_.reset();
-        for (auto& thread : threads_)
-        {
-            thread.join();
-        }
-        lifecycle_ = Lifecycle::Stopped;
-    }
-
-    data::PersistedState ServerImpl::getPersistedState() const
-    {
-        data::PersistedState state {.term = term_, .entries = log_.entries};
-        if (std::holds_alternative<FollowerInfo>(state_))
-        {
-            auto const& followerInfo = std::get<FollowerInfo>(state_);
-            state.votedFor = followerInfo.votedFor;
-        }
-        return state;
-    }
-
-    std::optional<Peer> ServerImpl::getLeaderPeer() const
-    {
-        if (!lastLeaderID_.has_value())
-        {
-            return std::nullopt;
-        }
-
-        std::string leaderID = *lastLeaderID_;
-
-        // If this server is the leader, return its own peer info
-        if (leaderID == id_)
-        {
-            return Peer {.id = id_, .address = "self"};
-        }
-
-        // Find the peer info for the leader
-        auto it = clientIndices_.find(leaderID);
-        if (it != clientIndices_.end())
-        {
-            auto& client = clients_[it->second];
-            return Peer {.id = client.id, .address = client.address};
-        }
-
-        // Fallback if we can't find the peer info
-        spdlog::error("[{}] unknown leader ID: {}", id_, leaderID);
-        return Peer {.id = leaderID, .address = "unknown"};
-    }
-
-    void ServerImpl::scheduleTimeout()
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return;
-        }
-        if (!timer_)
-        {
-            timer_ = std::make_unique<asio::steady_timer>(io_);
-        }
-        timer_->expires_from_now(asio::chrono::milliseconds(timeoutInterval_));
-        timer_->async_wait(
-            [this](asio::error_code ec)
-            {
-                if (ec)
+            auto& leaderClientInfo = it->second;
+            auto& timer = leaderClientInfo.heartbeatTimer;
+            timer.expires_from_now(asio::chrono::milliseconds(heartbeatInterval_));
+            timer.async_wait(
+                [this, id](asio::error_code ec)
                 {
-                    return;
-                }
-                asio::post(strand_, [this] { processTimeout(); });
-            });
-    }
+                    if (ec)
+                    {
+                        return;
+                    }
+                    asio::post(strand_, [this, id] { processHeartbeatTimeout(id); });
+                });
+        }
 
-    void ServerImpl::scheduleHeartbeatTimeout(const std::string& id)
-    {
-        auto guard = work_;
-        if (shutdownCalled())
+        tl::expected<void, Error> ServerImpl::start()
         {
-            return;
-        }
-        if (!std::holds_alternative<LeaderInfo>(state_))
-        {
-            return;
-        }
-        auto& leaderInfo = std::get<LeaderInfo>(state_);
-        auto it = leaderInfo.clients.find(id);
-        if (it == leaderInfo.clients.end())
-        {
-            spdlog::error("[{}] unknown client ID: {}", id_, id);
-            return;
-        }
-        auto& leaderClientInfo = it->second;
-        auto& timer = leaderClientInfo.heartbeatTimer;
-        timer.expires_from_now(asio::chrono::milliseconds(heartbeatInterval_));
-        timer.async_wait(
-            [this, id](asio::error_code ec)
+            if (shutdownCalled())
             {
-                if (ec)
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+
+            std::call_once(startFlag_,
+                           [this]
+                           {
+                               lifecycle_ = Lifecycle::Running;
+                               scheduleTimeout();
+                           });
+            return {};
+        }
+
+        void ServerImpl::handleAppendEntries(
+            const data::AppendEntriesRequest& request,
+            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                callback(tl::make_unexpected(errors::NotRunning {}));
+                return;
+            }
+            asio::post(
+                strand_,
+                [this, request, callback = std::move(callback)]
                 {
-                    return;
-                }
-                asio::post(strand_, [this, id] { processHeartbeatTimeout(id); });
-            });
-    }
-
-    tl::expected<void, Error> ServerImpl::start()
-    {
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
-        }
-
-        std::call_once(startFlag_,
-                       [this]
-                       {
-                           lifecycle_ = Lifecycle::Running;
-                           scheduleTimeout();
-                       });
-        return {};
-    }
-
-    void ServerImpl::handleAppendEntries(
-        const data::AppendEntriesRequest& request,
-        std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            callback(tl::make_unexpected(errors::NotRunning {}));
-            return;
-        }
-        asio::post(
-            strand_,
-            [this, request, callback = std::move(callback)]
-            {
-                processInboundAppendEntries(
-                    request,
-                    [this, callback](tl::expected<data::AppendEntriesResponse, Error> response)
-                    {
-                        postPersist(
-                            [this, callback, response = std::move(response)](
-                                tl::expected<void, Error> result)
-                            {
-                                if (!result)
-                                {
-                                    spdlog::error(
-                                        "[{}] failed to persist state after AppendEntries: {}",
-                                        id_,
-                                        result.error());
-                                    callback(tl::make_unexpected(result.error()));
-                                    return;
-                                }
-                                callback(response);
-                            });
-                    });
-            });
-    }
-
-    void ServerImpl::handleRequestVote(
-        const data::RequestVoteRequest& request,
-        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            callback(tl::make_unexpected(errors::NotRunning {}));
-            return;
-        }
-        asio::post(strand_,
-                   [this, request, callback = std::move(callback)]
-                   {
-                       processInboundRequestVote(
-                           request,
-                           [this, callback](tl::expected<data::RequestVoteResponse, Error> response)
-                           {
-                               postPersist(
-                                   [this, callback, response = std::move(response)](
-                                       tl::expected<void, Error> result)
-                                   {
-                                       if (!result)
-                                       {
-                                           spdlog::error(
-                                               "[{}] failed to persist state after RequestVote: {}",
-                                               id_,
-                                               result.error());
-                                           callback(tl::make_unexpected(result.error()));
-                                           return;
-                                       }
-                                       callback(response);
-                                   });
-                           });
-                   });
-    }
-
-    tl::expected<uint64_t, Error> ServerImpl::getTerm() const
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
-        }
-        std::promise<tl::expected<uint64_t, Error>> promise;
-        auto future = promise.get_future();
-        asio::post(strand_,
-                   [this, &promise]
-                   {
-                       postPersist(
-                           [this, &promise, term = term_](tl::expected<void, Error> result)
-                           {
-                               if (!result)
-                               {
-                                   spdlog::error("[{}] failed to persist state before getTerm: {}",
-                                                 id_,
-                                                 result.error());
-                                   promise.set_value(tl::make_unexpected(result.error()));
-                                   return;
-                               }
-                               promise.set_value(term);
-                           });
-                   });
-        return future.get();
-    }
-
-    tl::expected<uint64_t, Error> ServerImpl::getCommitIndex() const
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
-        }
-        std::promise<tl::expected<uint64_t, Error>> promise;
-        auto future = promise.get_future();
-        asio::post(
-            strand_,
-            [this, &promise]
-            {
-                postPersist(
-                    [this, &promise, commitIndex = commitIndex_](tl::expected<void, Error> result)
-                    {
-                        if (!result)
+                    processInboundAppendEntries(
+                        request,
+                        [this, callback](tl::expected<data::AppendEntriesResponse, Error> response)
                         {
-                            spdlog::error("[{}] failed to persist state before getCommitIndex: {}",
-                                          id_,
-                                          result.error());
-                            promise.set_value(tl::make_unexpected(result.error()));
-                            return;
-                        }
-                        promise.set_value(commitIndex);
-                    });
-            });
-        return future.get();
-    }
-
-    tl::expected<uint64_t, Error> ServerImpl::getLogByteCount() const
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
-        }
-        std::promise<tl::expected<uint64_t, Error>> promise;
-        auto future = promise.get_future();
-        asio::post(strand_,
-                   [this, &promise]
-                   {
-                       const uint64_t count = log_.entries.size() * sizeof(data::LogEntry);
-                       postPersist(
-                           [this, &promise, count](tl::expected<void, Error> result)
-                           {
-                               if (!result)
-                               {
-                                   spdlog::error(
-                                       "[{}] failed to persist state before getLogByteCount: {}",
-                                       id_,
-                                       result.error());
-                                   promise.set_value(tl::make_unexpected(result.error()));
-                                   return;
-                               }
-                               promise.set_value(count);
-                           });
-                   });
-        return future.get();
-    }
-
-    tl::expected<Peer, Error> ServerImpl::getLeader() const
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
-        }
-        std::promise<tl::expected<std::optional<Peer>, Error>> promise;
-        auto future = promise.get_future();
-        asio::post(strand_,
-                   [this, &promise]
-                   {
-                       auto leaderPeer = getLeaderPeer();
-
-                       postPersist(
-                           [this, &promise, leaderPeer](tl::expected<void, Error> result)
-                           {
-                               if (!result)
-                               {
-                                   spdlog::error(
-                                       "[{}] failed to persist state before getLeader: {}",
-                                       id_,
-                                       result.error());
-                                   promise.set_value(tl::make_unexpected(result.error()));
-                                   return;
-                               }
-                               promise.set_value(leaderPeer);
-                           });
-                   });
-        auto result = future.get();
-        if (!result)
-        {
-            return tl::make_unexpected(result.error());
-        }
-        if (!result.value())
-        {
-            return tl::make_unexpected(errors::UnknownLeader {});
-        }
-        return *result.value();
-    }
-
-    tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
-        }
-        std::promise<tl::expected<EntryInfo, Error>> promise;
-        auto future = promise.get_future();
-
-        asio::post(strand_,
-                   [this, data = std::move(data), &promise]() mutable
-                   {
-                       bool isLeader = std::holds_alternative<LeaderInfo>(state_);
-                       std::optional<EntryInfo> entryInfo;
-                       if (isLeader)
-                       {
-                           entryInfo = log_.appendOne(term_, std::move(data));
-                       }
-                       postPersist(
-                           [this, &promise, entryInfo, isLeader](tl::expected<void, Error> result)
-                           {
-                               if (!result)
-                               {
-                                   spdlog::error("[{}] failed to persist state before append: {}",
-                                                 id_,
-                                                 result.error());
-                                   promise.set_value(tl::make_unexpected(result.error()));
-                                   return;
-                               }
-                               if (!isLeader)
-                               {
-                                   promise.set_value(tl::make_unexpected(errors::NotLeader {}));
-                                   return;
-                               }
-                               promise.set_value(*entryInfo);
-                           });
-                   });
-        return future.get();
-    }
-
-    // This is thread-safe since ID is a constant.
-    std::string ServerImpl::getId() const
-    {
-        return id_;
-    }
-
-    tl::expected<Status, Error> ServerImpl::getStatus() const
-    {
-        auto guard = work_;
-        if (shutdownCalled())
-        {
-            return tl::make_unexpected(errors::NotRunning {});
+                            postPersist(
+                                [this, callback, response = std::move(response)](
+                                    tl::expected<void, Error> result)
+                                {
+                                    if (!result)
+                                    {
+                                        spdlog::error(
+                                            "[{}] failed to persist state after AppendEntries: {}",
+                                            id_,
+                                            result.error());
+                                        callback(tl::make_unexpected(result.error()));
+                                        return;
+                                    }
+                                    callback(response);
+                                });
+                        });
+                });
         }
 
-        std::promise<tl::expected<Status, Error>> promise;
-        auto future = promise.get_future();
-        asio::post(strand_,
-                   [this, &promise]
-                   {
-                       Status status {.isLeader = std::holds_alternative<LeaderInfo>(state_),
-                                      .leader = getLeaderPeer(),
-                                      .term = term_,
-                                      .commitIndex = commitIndex_,
-                                      .logByteCount = log_.entries.size() * sizeof(data::LogEntry)};
-                       postPersist(
-                           [this, &promise, status](tl::expected<void, Error> result)
-                           {
-                               if (!result)
-                               {
-                                   spdlog::error(
-                                       "[{}] failed to persist state before getStatus: {}",
-                                       id_,
-                                       result.error());
-                                   promise.set_value(tl::make_unexpected(result.error()));
-                                   return;
-                               }
-                               promise.set_value(status);
-                           });
-                   });
-        return future.get();
-    }
-
-    void ServerImpl::setCommitCallback(CommitCallback callback)
-    {
-        std::lock_guard lock {mutex_};
-        commitCallback_ = callback;
-    }
-
-    void ServerImpl::clearCommitCallback()
-    {
-        std::lock_guard lock {mutex_};
-        commitCallback_.reset();
-    }
-
-    void ServerImpl::setLeaderChangedCallback(LeaderChangedCallback callback)
-    {
-        std::lock_guard lock {mutex_};
-        leaderChangedCallback_ = callback;
-    }
-
-    void ServerImpl::clearLeaderChangedCallback()
-    {
-        std::lock_guard lock {mutex_};
-        leaderChangedCallback_.reset();
-    }
-
-    void ServerImpl::processTimeout()
-    {
-        if (std::holds_alternative<LeaderInfo>(state_))
+        void ServerImpl::handleRequestVote(
+            const data::RequestVoteRequest& request,
+            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
         {
-            return;
-        }
-        term_++;
-        state_ = CandidateInfo {
-            .voteCount = 1,  // Vote for self
-        };
-        scheduleTimeout();
-
-        data::RequestVoteRequest request {
-            .term = term_,
-            .candidateID = id_,
-            .lastLogIndex = log_.lastIndex(),
-            .lastLogTerm = log_.lastTerm(),
-        };
-
-        postPersist(
-            [this, request](tl::expected<void, Error> result)
+            auto guard = work_;
+            if (shutdownCalled())
             {
-                if (!result)
+                callback(tl::make_unexpected(errors::NotRunning {}));
+                return;
+            }
+            asio::post(
+                strand_,
+                [this, request, callback = std::move(callback)]
                 {
-                    spdlog::error(
-                        "[{}] failed to persist state during timeout: {}", id_, result.error());
-                    return;
-                }
-                for (auto& client : clients_)
+                    processInboundRequestVote(
+                        request,
+                        [this, callback](tl::expected<data::RequestVoteResponse, Error> response)
+                        {
+                            postPersist(
+                                [this, callback, response = std::move(response)](
+                                    tl::expected<void, Error> result)
+                                {
+                                    if (!result)
+                                    {
+                                        spdlog::error(
+                                            "[{}] failed to persist state after RequestVote: {}",
+                                            id_,
+                                            result.error());
+                                        callback(tl::make_unexpected(result.error()));
+                                        return;
+                                    }
+                                    callback(response);
+                                });
+                        });
+                });
+        }
+
+        tl::expected<uint64_t, Error> ServerImpl::getTerm() const
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+            std::promise<tl::expected<uint64_t, Error>> promise;
+            auto future = promise.get_future();
+            asio::post(strand_,
+                       [this, &promise]
+                       {
+                           postPersist(
+                               [this, &promise, term = term_](tl::expected<void, Error> result)
+                               {
+                                   if (!result)
+                                   {
+                                       spdlog::error(
+                                           "[{}] failed to persist state before getTerm: {}",
+                                           id_,
+                                           result.error());
+                                       promise.set_value(tl::make_unexpected(result.error()));
+                                       return;
+                                   }
+                                   promise.set_value(term);
+                               });
+                       });
+            return future.get();
+        }
+
+        tl::expected<uint64_t, Error> ServerImpl::getCommitIndex() const
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+            std::promise<tl::expected<uint64_t, Error>> promise;
+            auto future = promise.get_future();
+            asio::post(strand_,
+                       [this, &promise]
+                       {
+                           postPersist(
+                               [this, &promise, commitIndex = commitIndex_](
+                                   tl::expected<void, Error> result)
+                               {
+                                   if (!result)
+                                   {
+                                       spdlog::error(
+                                           "[{}] failed to persist state before getCommitIndex: {}",
+                                           id_,
+                                           result.error());
+                                       promise.set_value(tl::make_unexpected(result.error()));
+                                       return;
+                                   }
+                                   promise.set_value(commitIndex);
+                               });
+                       });
+            return future.get();
+        }
+
+        static size_t calculateSize(const data::LogEntry& entry)
+        {
+            return sizeof(entry.term)
+                + std::visit(
+                       errors::overloaded {[](const std::vector<std::byte>& data)
+                                           { return data.size(); },
+                                           [](const data::NoOp&) { return sizeof(data::NoOp); }},
+                       entry.entry);
+        }
+
+        tl::expected<uint64_t, Error> ServerImpl::getLogByteCount() const
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+            std::promise<tl::expected<uint64_t, Error>> promise;
+            auto future = promise.get_future();
+            asio::post(
+                strand_,
+                [this, &promise]
                 {
-                    postRequestVote(client,
-                                    request,
-                                    [this](tl::expected<data::RequestVoteResponse, Error> response)
-                                    { onRequestVoteResponse(std::move(response)); });
+                    uint64_t count = 0;
+                    for (const auto& entry : log_.entries)
+                    {
+                        count += calculateSize(entry);
+                    }
+                    postPersist(
+                        [this, &promise, count](tl::expected<void, Error> result)
+                        {
+                            if (!result)
+                            {
+                                spdlog::error(
+                                    "[{}] failed to persist state before getLogByteCount: {}",
+                                    id_,
+                                    result.error());
+                                promise.set_value(tl::make_unexpected(result.error()));
+                                return;
+                            }
+                            promise.set_value(count);
+                        });
+                });
+            return future.get();
+        }
+
+        tl::expected<Peer, Error> ServerImpl::getLeader() const
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+            std::promise<tl::expected<std::optional<Peer>, Error>> promise;
+            auto future = promise.get_future();
+            asio::post(strand_,
+                       [this, &promise]
+                       {
+                           auto leaderPeer = getLeaderPeer();
+
+                           postPersist(
+                               [this, &promise, leaderPeer](tl::expected<void, Error> result)
+                               {
+                                   if (!result)
+                                   {
+                                       spdlog::error(
+                                           "[{}] failed to persist state before getLeader: {}",
+                                           id_,
+                                           result.error());
+                                       promise.set_value(tl::make_unexpected(result.error()));
+                                       return;
+                                   }
+                                   promise.set_value(leaderPeer);
+                               });
+                       });
+            auto result = future.get();
+            if (!result)
+            {
+                return tl::make_unexpected(result.error());
+            }
+            if (!result.value())
+            {
+                return tl::make_unexpected(errors::UnknownLeader {});
+            }
+            return *result.value();
+        }
+
+        tl::expected<EntryInfo, Error> ServerImpl::append(std::vector<std::byte> data)
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+            std::promise<tl::expected<EntryInfo, Error>> promise;
+            auto future = promise.get_future();
+
+            asio::post(
+                strand_,
+                [this, data = std::move(data), &promise]() mutable
+                {
+                    bool isLeader = std::holds_alternative<LeaderInfo>(state_);
+                    std::optional<EntryInfo> entryInfo;
+                    if (isLeader)
+                    {
+                        entryInfo = log_.appendOne(term_, std::move(data));
+                    }
+                    postPersist(
+                        [this, &promise, entryInfo, isLeader](tl::expected<void, Error> result)
+                        {
+                            if (!result)
+                            {
+                                spdlog::error("[{}] failed to persist state before append: {}",
+                                              id_,
+                                              result.error());
+                                promise.set_value(tl::make_unexpected(result.error()));
+                                return;
+                            }
+                            if (!isLeader)
+                            {
+                                promise.set_value(tl::make_unexpected(errors::NotLeader {}));
+                                return;
+                            }
+                            promise.set_value(*entryInfo);
+                        });
+                });
+            return future.get();
+        }
+
+        // This is thread-safe since ID is a constant.
+        std::string ServerImpl::getId() const
+        {
+            return id_;
+        }
+
+        tl::expected<Status, Error> ServerImpl::getStatus() const
+        {
+            auto guard = work_;
+            if (shutdownCalled())
+            {
+                return tl::make_unexpected(errors::NotRunning {});
+            }
+
+            std::promise<tl::expected<Status, Error>> promise;
+            auto future = promise.get_future();
+            asio::post(
+                strand_,
+                [this, &promise]
+                {
+                    Status status {.isLeader = std::holds_alternative<LeaderInfo>(state_),
+                                   .leader = getLeaderPeer(),
+                                   .term = term_,
+                                   .commitIndex = commitIndex_,
+                                   .logByteCount = log_.entries.size() * sizeof(data::LogEntry)};
+                    postPersist(
+                        [this, &promise, status](tl::expected<void, Error> result)
+                        {
+                            if (!result)
+                            {
+                                spdlog::error("[{}] failed to persist state before getStatus: {}",
+                                              id_,
+                                              result.error());
+                                promise.set_value(tl::make_unexpected(result.error()));
+                                return;
+                            }
+                            promise.set_value(status);
+                        });
+                });
+            return future.get();
+        }
+
+        void ServerImpl::setCommitCallback(CommitCallback callback)
+        {
+            std::lock_guard lock {mutex_};
+            commitCallback_ = callback;
+        }
+
+        void ServerImpl::clearCommitCallback()
+        {
+            std::lock_guard lock {mutex_};
+            commitCallback_.reset();
+        }
+
+        void ServerImpl::setLeaderChangedCallback(LeaderChangedCallback callback)
+        {
+            std::lock_guard lock {mutex_};
+            leaderChangedCallback_ = callback;
+        }
+
+        void ServerImpl::clearLeaderChangedCallback()
+        {
+            std::lock_guard lock {mutex_};
+            leaderChangedCallback_.reset();
+        }
+
+        void ServerImpl::processTimeout()
+        {
+            if (std::holds_alternative<LeaderInfo>(state_))
+            {
+                return;
+            }
+            term_++;
+            state_ = CandidateInfo {
+                .voteCount = 1,  // Vote for self
+            };
+            scheduleTimeout();
+
+            data::RequestVoteRequest request {
+                .term = term_,
+                .candidateID = id_,
+                .lastLogIndex = log_.lastIndex(),
+                .lastLogTerm = log_.lastTerm(),
+            };
+
+            postPersist(
+                [this, request](tl::expected<void, Error> result)
+                {
+                    if (!result)
+                    {
+                        spdlog::error(
+                            "[{}] failed to persist state during timeout: {}", id_, result.error());
+                        return;
+                    }
+                    for (auto& client : clients_)
+                    {
+                        postRequestVote(
+                            client,
+                            request,
+                            [this](tl::expected<data::RequestVoteResponse, Error> response)
+                            { onRequestVoteResponse(std::move(response)); });
+                    }
+                });
+        }
+
+        void ServerImpl::processHeartbeatTimeout(const std::string& id)
+        {
+            if (!std::holds_alternative<LeaderInfo>(state_))
+            {
+                return;
+            }
+            auto& leaderInfo = std::get<LeaderInfo>(state_);
+            auto it = leaderInfo.clients.find(id);
+            if (it == leaderInfo.clients.end())
+            {
+                spdlog::error("[{}] unknown client ID: {}", id_, id);
+                return;
+            }
+            scheduleHeartbeatTimeout(id);
+
+            auto& leaderClientInfo = it->second;
+            uint64_t nextIndex = leaderClientInfo.nextIndex;
+            uint64_t lastIndex =
+                std::min(nextIndex + leaderClientInfo.batchSize - 1, log_.lastIndex());
+            std::vector<data::LogEntry> entries;
+            for (uint64_t i = nextIndex; i <= lastIndex; i++)
+            {
+                entries.push_back(*log_.get(i));
+            }
+            auto* prevLogEntry = log_.get(nextIndex - 1);
+            auto prevLogTerm = prevLogEntry != nullptr ? prevLogEntry->term : 0;
+
+            data::AppendEntriesRequest appendRequest {
+                .term = term_,
+                .leaderID = id_,
+                .prevLogIndex = nextIndex - 1,
+                .prevLogTerm = prevLogTerm,
+                .entries = entries,
+                .leaderCommit = commitIndex_,
+            };
+            leaderClientInfo.nextIndex = lastIndex + 1;
+            postAppendEntries(
+                id,
+                appendRequest,
+                [this, id, appendRequest](tl::expected<data::AppendEntriesResponse, Error> response)
+                { onAppendEntriesResponse(id, appendRequest, std::move(response)); });
+        }
+
+        void ServerImpl::processInboundAppendEntries(
+            const data::AppendEntriesRequest& request,
+            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
+        {
+            if (request.term < term_)
+            {
+                callback(data::AppendEntriesResponse {
+                    .term = term_,
+                    .success = false,
+                });
+                return;
+            }
+
+            if (request.term > term_ || !std::holds_alternative<FollowerInfo>(state_))
+            {
+                term_ = request.term;
+                bool lostLeadership = std::holds_alternative<LeaderInfo>(state_);
+                becomeFollower();
+                auto previousLeaderID = lastLeaderID_;
+                lastLeaderID_ = request.leaderID;
+                if (previousLeaderID != lastLeaderID_)
+                {
+                    invokeLeaderChangedCallback(false, lostLeadership);
                 }
-            });
-    }
+            }
 
-    void ServerImpl::processHeartbeatTimeout(const std::string& id)
-    {
-        if (!std::holds_alternative<LeaderInfo>(state_))
-        {
-            return;
-        }
-        auto& leaderInfo = std::get<LeaderInfo>(state_);
-        auto it = leaderInfo.clients.find(id);
-        if (it == leaderInfo.clients.end())
-        {
-            spdlog::error("[{}] unknown client ID: {}", id_, id);
-            return;
-        }
-        scheduleHeartbeatTimeout(id);
+            if (!log_.isConsistentWith(request.prevLogIndex, request.prevLogTerm))
+            {
+                callback(data::AppendEntriesResponse {
+                    .term = term_,
+                    .success = false,
+                });
+                return;
+            }
+            scheduleTimeout();
 
-        auto& leaderClientInfo = it->second;
-        uint64_t nextIndex = leaderClientInfo.nextIndex;
-        uint64_t lastIndex = std::min(nextIndex + leaderClientInfo.batchSize - 1, log_.lastIndex());
-        std::vector<data::LogEntry> entries;
-        for (uint64_t i = nextIndex; i <= lastIndex; i++)
-        {
-            entries.push_back(*log_.get(i));
-        }
-        auto* prevLogEntry = log_.get(nextIndex - 1);
-        auto prevLogTerm = prevLogEntry != nullptr ? prevLogEntry->term : 0;
+            log_.store(request.prevLogIndex + 1, request.entries);
 
-        data::AppendEntriesRequest appendRequest {
-            .term = term_,
-            .leaderID = id_,
-            .prevLogIndex = nextIndex - 1,
-            .prevLogTerm = prevLogTerm,
-            .entries = entries,
-            .leaderCommit = commitIndex_,
-        };
-        leaderClientInfo.nextIndex = lastIndex + 1;
-        postAppendEntries(
-            id,
-            appendRequest,
-            [this, id, appendRequest](tl::expected<data::AppendEntriesResponse, Error> response)
-            { onAppendEntriesResponse(id, appendRequest, std::move(response)); });
-    }
+            if (request.leaderCommit > commitIndex_)
+            {
+                uint64_t const newCommitIndex = std::min(request.leaderCommit, log_.lastIndex());
+                for (uint64_t i = commitIndex_ + 1; i <= newCommitIndex; i++)
+                {
+                    invokeCommitCallback(i);
+                }
+                commitIndex_ = newCommitIndex;
+            }
 
-    void ServerImpl::processInboundAppendEntries(
-        const data::AppendEntriesRequest& request,
-        std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
-    {
-        if (request.term < term_)
-        {
             callback(data::AppendEntriesResponse {
                 .term = term_,
-                .success = false,
+                .success = true,
             });
-            return;
         }
 
-        if (request.term > term_ || !std::holds_alternative<FollowerInfo>(state_))
+        void ServerImpl::processInboundRequestVote(
+            const data::RequestVoteRequest& request,
+            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
         {
-            term_ = request.term;
-            bool lostLeadership = std::holds_alternative<LeaderInfo>(state_);
-            becomeFollower();
-            auto previousLeaderID = lastLeaderID_;
-            lastLeaderID_ = request.leaderID;
-            if (previousLeaderID != lastLeaderID_)
+            if (request.term < term_)
             {
-                invokeLeaderChangedCallback(false, lostLeadership);
+                callback(data::RequestVoteResponse {
+                    .term = term_,
+                    .voteGranted = false,
+                });
+                return;
+            }
+            if (request.term > term_)
+            {
+                term_ = request.term;
+                becomeFollower();
+            }
+
+            if (!std::holds_alternative<FollowerInfo>(state_))
+            {
+                callback(data::RequestVoteResponse {
+                    .term = term_,
+                    .voteGranted = false,
+                });
+                return;
+            }
+            auto& followerInfo = std::get<FollowerInfo>(state_);
+            if (followerInfo.votedFor.has_value() && *followerInfo.votedFor != request.candidateID)
+            {
+                callback(data::RequestVoteResponse {
+                    .term = term_,
+                    .voteGranted = false,
+                });
+                return;
+            }
+            bool voteGranted = log_.candidateIsEligible(request.lastLogIndex, request.lastLogTerm);
+            if (voteGranted)
+            {
+                followerInfo.votedFor = request.candidateID;
+            }
+            callback(data::RequestVoteResponse {
+                .term = term_,
+                .voteGranted = voteGranted,
+            });
+        }
+
+        void ServerImpl::invokeLeaderChangedCallback(bool isLeader, bool lostLeadership)
+        {
+            postPersist(
+                [this, leader = getLeaderPeer(), isLeader, lostLeadership](
+                    tl::expected<void, Error> result)
+                {
+                    if (!result)
+                    {
+                        spdlog::error(
+                            "[{}] failed to persist state before leader changed callback: {}",
+                            id_,
+                            result.error());
+                        return;
+                    }
+                    std::lock_guard lock {mutex_};
+                    if (leaderChangedCallback_)
+                    {
+                        (*leaderChangedCallback_)(leader, isLeader, lostLeadership);
+                    }
+                });
+        }
+
+        void ServerImpl::invokeCommitCallback(uint64_t index)
+        {
+            auto* logEntry = log_.get(index);
+            if (logEntry == nullptr)
+            {
+                spdlog::error("[{}] failed to get log entry at index {}", id_, index);
+                return;
+            }
+
+            std::lock_guard lock {mutex_};
+            if (!commitCallback_)
+            {
+                return;
+            }
+            EntryInfo info {.index = index, .term = logEntry->term};
+            if (std::holds_alternative<data::NoOp>(logEntry->entry))
+            {
+                return;
+            }
+            (*commitCallback_)(info, std::get<std::vector<std::byte>>(logEntry->entry));
+        }
+
+        void ServerImpl::postPersist(std::function<void(tl::expected<void, Error>)> callback) const
+        {
+            auto data = data::serialize(getPersistedState());
+            // We need the guard to keep the threads alive until the callback is invoked.
+            auto cb = [this, guard = work_, callback = std::move(callback)](
+                          tl::expected<void, Error> result)
+            {
+                (void)guard;
+                // PersistenceHandler may run the callback on a different thread, so we post it back
+                // to the strand.
+                asio::post(strand_, [callback, result] { callback(result); });
+            };
+            persistenceHandler_->addRequest(
+                impl::PersistenceRequest {.data = data, .callback = cb});
+        }
+
+        void ServerImpl::postRequestVote(
+            ClientInfo const& client,
+            const data::RequestVoteRequest& request,
+            std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
+        {
+            auto cb = [this, guard = work_, callback = std::move(callback)](
+                          tl::expected<data::RequestVoteResponse, Error> response)
+            {
+                (void)guard;
+                asio::post(strand_,
+                           [callback, response = std::move(response)] { callback(response); });
+            };
+            client.client->requestVote(request, requestConfig_, cb);
+        }
+
+        void ServerImpl::postAppendEntries(
+            const std::string& id,
+            const data::AppendEntriesRequest& request,
+            std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
+        {
+            auto it = clientIndices_.find(id);
+            if (it == clientIndices_.end())
+            {
+                spdlog::error("[{}] unknown client ID: {}", id_, id);
+                return;
+            }
+            auto& client = clients_[it->second];
+            auto cb = [this, guard = work_, callback = std::move(callback)](
+                          tl::expected<data::AppendEntriesResponse, Error> response)
+            {
+                (void)guard;
+                asio::post(strand_,
+                           [callback, response = std::move(response)] { callback(response); });
+            };
+            client.client->appendEntries(request, requestConfig_, cb);
+        }
+
+        void ServerImpl::onRequestVoteResponse(
+            tl::expected<data::RequestVoteResponse, Error> response)
+        {
+            if (!response)
+            {
+                spdlog::debug(
+                    "[{}] received RequestVote response with error: {}", id_, response.error());
+                return;
+            }
+
+            auto const& voteResponse = *response;
+            if (voteResponse.term < term_)
+            {
+                // We have already moved on to a newer term, so we ignore this response.
+                return;
+            }
+            if (voteResponse.term > term_)
+            {
+                term_ = voteResponse.term;
+                becomeFollower();
+                return;
+            }
+
+            if (!std::holds_alternative<CandidateInfo>(state_))
+            {
+                // This might happen if we receive a RequestVote response after we have already
+                // become the leader.
+                return;
+            }
+            auto& candidateInfo = std::get<CandidateInfo>(state_);
+            if (!voteResponse.voteGranted)
+            {
+                return;
+            }
+            candidateInfo.voteCount++;
+            const size_t clusterSize = clients_.size() + 1;
+            const size_t neededVotes = (clusterSize / 2) + 1;
+            if (candidateInfo.voteCount < neededVotes)
+            {
+                return;
+            }
+            // We have enough votes to become the leader.
+            becomeLeader();
+        }
+
+        void ServerImpl::onAppendEntriesResponse(
+            const std::string& id,
+            const data::AppendEntriesRequest& request,
+            tl::expected<data::AppendEntriesResponse, Error> response)
+        {
+            if (!response)
+            {
+                spdlog::debug(
+                    "[{}] received AppendEntries response with error: {}", id_, response.error());
+                return;
+            }
+
+            auto const& appendResponse = *response;
+            if (appendResponse.term < term_)
+            {
+                // We have already moved on to a newer term, so we ignore this response.
+                return;
+            }
+            if (appendResponse.term > term_)
+            {
+                term_ = appendResponse.term;
+                becomeFollower();
+                return;
+            }
+
+            if (!std::holds_alternative<LeaderInfo>(state_))
+            {
+                spdlog::debug(
+                    "[{}] received AppendEntries response in correct term while not a leader: {}",
+                    id_,
+                    id);
+                return;
+            }
+            auto& leaderInfo = std::get<LeaderInfo>(state_);
+            auto it = leaderInfo.clients.find(id);
+            if (it == leaderInfo.clients.end())
+            {
+                spdlog::error("[{}] unknown client ID: {}", id_, id);
+                return;
+            }
+            auto& leaderClientInfo = it->second;
+            if (!appendResponse.success)
+            {
+                if (leaderClientInfo.nextIndex < request.prevLogIndex + 1)
+                {
+                    // If this is the case, then we don't need to lower nextIndex because
+                    // another server has already done it for us.
+                    return;
+                }
+                if (leaderClientInfo.matchIndex >= request.prevLogIndex)
+                {
+                    // This safeguards against out-of-order responses. If we already know the server
+                    // contains entries past and including prevLogIndex, then decrementing nextIndex
+                    // would result in us re-sending them.
+                    return;
+                }
+                leaderClientInfo.nextIndex =
+                    std::min(leaderClientInfo.nextIndex, request.prevLogIndex);
+                return;
+            }
+
+            const uint64_t newMatchIndex = request.prevLogIndex + request.entries.size();
+            leaderClientInfo.matchIndex = std::max(leaderClientInfo.matchIndex, newMatchIndex);
+            leaderClientInfo.nextIndex = std::max(leaderClientInfo.nextIndex, newMatchIndex + 1);
+
+            commitNewEntries();
+        }
+
+        void ServerImpl::becomeFollower()
+        {
+            state_ = FollowerInfo {};
+            scheduleTimeout();
+        }
+
+        void ServerImpl::becomeLeader()
+        {
+            if (timer_)
+            {
+                timer_->cancel();
+            }
+            state_ = LeaderInfo {};
+            auto& leaderInfo = std::get<LeaderInfo>(state_);
+            leaderInfo.clients.reserve(clients_.size());
+            for (auto const& client : clients_)
+            {
+                leaderInfo.clients.emplace(std::pair {client.id,
+                                                      LeaderClientInfo {
+                                                          .nextIndex = log_.lastIndex() + 1,
+                                                          .matchIndex = 0,
+                                                          .heartbeatTimer = asio::steady_timer(io_),
+                                                          .batchSize = 1,  // Default batch size.
+                                                      }});
+            }
+            lastLeaderID_ = id_;
+            invokeLeaderChangedCallback(true, false);
+            log_.appendNoOp(term_);
+            for (auto const& client : clients_)
+            {
+                processHeartbeatTimeout(client.id);
             }
         }
 
-        if (!log_.isConsistentWith(request.prevLogIndex, request.prevLogTerm))
+        void ServerImpl::commitNewEntries()
         {
-            callback(data::AppendEntriesResponse {
-                .term = term_,
-                .success = false,
-            });
-            return;
-        }
-        scheduleTimeout();
+            auto leaderInfo = std::get_if<LeaderInfo>(&state_);
+            if (leaderInfo == nullptr)
+            {
+                spdlog::error("[{}] commitNewEntries called while not a leader", id_);
+                return;
+            }
+            uint64_t newCommitIndex = commitIndex_;
+            for (uint64_t n = log_.lastIndex(); n > commitIndex_; --n)
+            {
+                if (log_.get(n)->term != term_)
+                {
+                    continue;
+                }
 
-        log_.store(request.prevLogIndex + 1, request.entries);
+                int majorityCount = 1;  // Leader itself.
+                for (auto const& [id, clientInfo] : leaderInfo->clients)
+                {
+                    if (clientInfo.matchIndex >= n)
+                    {
+                        majorityCount++;
+                    }
+                }
 
-        if (request.leaderCommit > commitIndex_)
-        {
-            uint64_t const newCommitIndex = std::min(request.leaderCommit, log_.lastIndex());
-            for (uint64_t i = commitIndex_ + 1; i <= newCommitIndex; i++)
+                if (majorityCount > (clients_.size() + 1) / 2)
+                {
+                    newCommitIndex = n;
+                    break;  // Found it, no need to check smaller indices.
+                }
+            }
+            for (auto i = commitIndex_ + 1; i <= newCommitIndex; i++)
             {
                 invokeCommitCallback(i);
             }
-            commitIndex_ = newCommitIndex;
+            commitIndex_ = std::max(newCommitIndex, commitIndex_);
         }
-
-        callback(data::AppendEntriesResponse {
-            .term = term_,
-            .success = true,
-        });
-    }
-
-    void ServerImpl::processInboundRequestVote(
-        const data::RequestVoteRequest& request,
-        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
-    {
-        if (request.term < term_)
-        {
-            callback(data::RequestVoteResponse {
-                .term = term_,
-                .voteGranted = false,
-            });
-            return;
-        }
-        if (request.term > term_)
-        {
-            term_ = request.term;
-            becomeFollower();
-        }
-
-        if (!std::holds_alternative<FollowerInfo>(state_))
-        {
-            callback(data::RequestVoteResponse {
-                .term = term_,
-                .voteGranted = false,
-            });
-            return;
-        }
-        auto& followerInfo = std::get<FollowerInfo>(state_);
-        if (followerInfo.votedFor.has_value() && *followerInfo.votedFor != request.candidateID)
-        {
-            callback(data::RequestVoteResponse {
-                .term = term_,
-                .voteGranted = false,
-            });
-            return;
-        }
-        callback(data::RequestVoteResponse {
-            .term = term_,
-            .voteGranted = log_.candidateIsEligible(request.lastLogIndex, request.lastLogTerm),
-        });
-        followerInfo.votedFor = request.candidateID;
-    }
-
-    void ServerImpl::invokeLeaderChangedCallback(bool isLeader, bool lostLeadership)
-    {
-        postPersist(
-            [this, leader = getLeaderPeer(), isLeader, lostLeadership](
-                tl::expected<void, Error> result)
-            {
-                if (!result)
-                {
-                    spdlog::error("[{}] failed to persist state before leader changed callback: {}",
-                                  id_,
-                                  result.error());
-                    return;
-                }
-                std::lock_guard lock {mutex_};
-                if (leaderChangedCallback_)
-                {
-                    (*leaderChangedCallback_)(leader, isLeader, lostLeadership);
-                }
-            });
-    }
-
-    void ServerImpl::invokeCommitCallback(uint64_t index)
-    {
-        auto* logEntry = log_.get(index);
-        if (logEntry == nullptr)
-        {
-            spdlog::error("[{}] failed to get log entry at index {}", id_, index);
-            return;
-        }
-
-        std::lock_guard lock {mutex_};
-        if (!commitCallback_)
-        {
-            return;
-        }
-        EntryInfo info {.index = index, .term = logEntry->term};
-        if (std::holds_alternative<data::NoOp>(logEntry->entry))
-        {
-            return;
-        }
-        (*commitCallback_)(info, std::get<std::vector<std::byte>>(logEntry->entry));
-    }
-
-    void ServerImpl::postPersist(std::function<void(tl::expected<void, Error>)> callback) const
-    {
-        auto data = data::serialize(getPersistedState());
-        // We need the guard to keep the threads alive until the callback is invoked.
-        auto cb = [this, guard = work_, callback = std::move(callback)](tl::expected<void, Error> result)
-        {
-            (void)guard;
-            // PersistenceHandler may run the callback on a different thread, so we post it back to
-            // the strand.
-            asio::post(strand_, [callback, result] { callback(result); });
-        };
-        persistenceHandler_->addRequest(impl::PersistenceRequest {.data = data, .callback = cb});
-    }
-
-    void ServerImpl::postRequestVote(
-        ClientInfo const& client,
-        const data::RequestVoteRequest& request,
-        std::function<void(tl::expected<data::RequestVoteResponse, Error>)> callback)
-    {
-        auto cb = [this, guard = work_, callback = std::move(callback)](
-                      tl::expected<data::RequestVoteResponse, Error> response)
-        {
-            (void)guard;
-            asio::post(strand_, [callback, response = std::move(response)] { callback(response); });
-        };
-        client.client->requestVote(request, requestConfig_, cb);
-    }
-
-    void ServerImpl::postAppendEntries(
-        const std::string& id,
-        const data::AppendEntriesRequest& request,
-        std::function<void(tl::expected<data::AppendEntriesResponse, Error>)> callback)
-    {
-        auto it = clientIndices_.find(id);
-        if (it == clientIndices_.end())
-        {
-            spdlog::error("[{}] unknown client ID: {}", id_, id);
-            return;
-        }
-        auto& client = clients_[it->second];
-        auto cb = [this, guard = work_, callback = std::move(callback)](
-                      tl::expected<data::AppendEntriesResponse, Error> response)
-        {
-            (void)guard;
-            asio::post(strand_, [callback, response = std::move(response)] { callback(response); });
-        };
-        client.client->appendEntries(request, requestConfig_, cb);
-    }
-
-    void ServerImpl::onRequestVoteResponse(tl::expected<data::RequestVoteResponse, Error> response)
-    {
-        if (!response)
-        {
-            spdlog::debug(
-                "[{}] received RequestVote response with error: {}", id_, response.error());
-            return;
-        }
-
-        auto const& voteResponse = *response;
-        if (voteResponse.term < term_)
-        {
-            // We have already moved on to a newer term, so we ignore this response.
-            return;
-        }
-        if (voteResponse.term > term_)
-        {
-            term_ = voteResponse.term;
-            becomeFollower();
-            return;
-        }
-
-        if (!std::holds_alternative<CandidateInfo>(state_))
-        {
-            // This might happen if we receive a RequestVote response after we have already
-            // become the leader.
-            return;
-        }
-        auto& candidateInfo = std::get<CandidateInfo>(state_);
-        if (!voteResponse.voteGranted)
-        {
-            return;
-        }
-        candidateInfo.voteCount++;
-        auto neededVotes = (clients_.size() / 2) + 1;
-        if (candidateInfo.voteCount < neededVotes)
-        {
-            return;
-        }
-        // We have enough votes to become the leader.
-        becomeLeader();
-    }
-
-    void ServerImpl::onAppendEntriesResponse(
-        const std::string& id,
-        const data::AppendEntriesRequest& request,
-        tl::expected<data::AppendEntriesResponse, Error> response)
-    {
-        if (!response)
-        {
-            spdlog::debug(
-                "[{}] received AppendEntries response with error: {}", id_, response.error());
-            return;
-        }
-
-        auto const& voteResponse = *response;
-        if (voteResponse.term < term_)
-        {
-            // We have already moved on to a newer term, so we ignore this response.
-            return;
-        }
-        if (voteResponse.term > term_)
-        {
-            term_ = voteResponse.term;
-            becomeFollower();
-            return;
-        }
-
-        if (!std::holds_alternative<LeaderInfo>(state_))
-        {
-            spdlog::error(
-                "[{}] received AppendEntries response in correct term while not a leader: {}",
-                id_,
-                id);
-            return;
-        }
-        auto& leaderInfo = std::get<LeaderInfo>(state_);
-        auto it = leaderInfo.clients.find(id);
-        if (it == leaderInfo.clients.end())
-        {
-            spdlog::error("[{}] unknown client ID: {}", id_, id);
-            return;
-        }
-        auto& leaderClientInfo = it->second;
-        if (!voteResponse.success)
-        {
-            if (leaderClientInfo.nextIndex < request.prevLogIndex + 1)
-            {
-                // If this is the case, then we don't need to lower nextIndex because
-                // another server has already done it for us.
-                return;
-            }
-            if (leaderClientInfo.matchIndex >= request.prevLogIndex)
-            {
-                // This safeguards against out-of-order responses. If we already know the server
-                // contains entries past and including prevLogIndex, then decrementing nextIndex
-                // would result in us re-sending them.
-                return;
-            }
-            leaderClientInfo.nextIndex = std::min(leaderClientInfo.nextIndex, request.prevLogIndex);
-            return;
-        }
-
-        const uint64_t newMatchIndex = request.prevLogIndex + request.entries.size();
-        leaderClientInfo.matchIndex = std::max(leaderClientInfo.matchIndex, newMatchIndex);
-        leaderClientInfo.nextIndex = std::max(leaderClientInfo.nextIndex, newMatchIndex + 1);
-
-        commitNewEntries();
-    }
-
-    void ServerImpl::becomeFollower()
-    {
-        state_ = FollowerInfo {};
-        scheduleTimeout();
-    }
-
-    void ServerImpl::becomeLeader()
-    {
-        if (timer_)
-        {
-            timer_->cancel();
-        }
-        state_ = LeaderInfo {};
-        auto& leaderInfo = std::get<LeaderInfo>(state_);
-        leaderInfo.clients.reserve(clients_.size());
-        for (auto const& client : clients_)
-        {
-            leaderInfo.clients.emplace(std::pair {client.id,
-                                                  LeaderClientInfo {
-                                                      .nextIndex = log_.lastIndex() + 1,
-                                                      .matchIndex = 0,
-                                                      .heartbeatTimer = asio::steady_timer(io_),
-                                                      .batchSize = 1,  // Default batch size.
-                                                  }});
-            scheduleHeartbeatTimeout(client.id);
-        }
-        lastLeaderID_ = id_;
-        invokeLeaderChangedCallback(true, false);
-        log_.appendNoOp(term_);
-    }
-
-    void ServerImpl::commitNewEntries()
-    {
-        auto leaderInfo = std::get_if<LeaderInfo>(&state_);
-        if (leaderInfo == nullptr)
-        {
-            spdlog::error("[{}] commitNewEntries called while not a leader", id_);
-            return;
-        }
-        uint64_t newCommitIndex = commitIndex_;
-        for (uint64_t n = log_.lastIndex(); n > commitIndex_; --n)
-        {
-            if (log_.get(n)->term != term_)
-            {
-                continue;
-            }
-
-            int majorityCount = 1;  // Leader itself.
-            for (auto const& [id, clientInfo] : leaderInfo->clients)
-            {
-                if (clientInfo.matchIndex >= n)
-                {
-                    majorityCount++;
-                }
-            }
-
-            if (majorityCount > (clients_.size() + 1) / 2)
-            {
-                newCommitIndex = n;
-                break;  // Found it, no need to check smaller indices.
-            }
-        }
-        for (auto i = commitIndex_ + 1; i <= newCommitIndex; i++)
-        {
-            invokeCommitCallback(i);
-        }
-        commitIndex_ = std::max(newCommitIndex, commitIndex_);
-    }
+    }  // namespace
 
     tl::expected<std::shared_ptr<Server>, Error> createServer(ServerCreateConfig& config)
     {

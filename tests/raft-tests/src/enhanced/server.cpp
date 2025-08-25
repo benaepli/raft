@@ -54,27 +54,18 @@ namespace
             }
         }
 
-        /// Finds the current leader and returns the enhanced server for that leader
-        raft::enhanced::Server* checkOneLeader()
+        /// Finds the current leader and returns the enhanced server for that leader via out
+        /// parameter
+        void checkOneLeader(raft::enhanced::Server*& leader)
         {
-            auto leaderResult = tester_.checkOneLeader();
-            EXPECT_TRUE(leaderResult.has_value())
-                << "Failed to find leader: " << leaderResult.error();
+            std::string leaderID;
+            tester_.checkOneLeader(leaderID);
 
-            if (!leaderResult.has_value())
-            {
-                return nullptr;
-            }
-
-            std::string leaderID = *leaderResult;
             auto it = enhancedServers_.find(leaderID);
-            if (it != enhancedServers_.end())
-            {
-                return it->second.get();
-            }
+            ASSERT_TRUE(it != enhancedServers_.end())
+                << "Leader server not found in enhanced servers";
 
-            EXPECT_TRUE(false) << "Leader server not found in enhanced servers";
-            return nullptr;
+            leader = it->second.get();
         }
 
       private:
@@ -87,8 +78,8 @@ TEST(EnhancedServerTest, SimpleCommitOnLeader)
 {
     EnhancedServerTester tester({"A", "B", "C"});
 
-    auto* enhancedServer = tester.checkOneLeader();
-    ASSERT_NE(enhancedServer, nullptr);
+    raft::enhanced::Server* enhancedServer;
+    tester.checkOneLeader(enhancedServer);
 
     // Test data to commit
     std::array state {0, 1, 2};
@@ -123,9 +114,8 @@ TEST(EnhancedServerTest, SimpleCommitOnLeader)
     }
 
     // Verify the commit succeeded
-    EXPECT_TRUE(commitResult.has_value())
-        << "Commit failed with error: "
-        << (!commitResult.has_value() ? fmt::format("{}", commitResult.error()) : "");
+    ASSERT_TRUE(commitResult.has_value())
+        << "Commit failed: " << fmt::format("{}", commitResult.error());
 
     EXPECT_EQ(commitResult->data, dataBytes) << "Committed data does not match";
     EXPECT_FALSE(commitResult->duplicate) << "First commit should not be marked as duplicate";
