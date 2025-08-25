@@ -15,3 +15,9 @@ message Entry {
   // The data contained in the log entry.
   bytes data = 3;
 }
+
+// EndSession represents the end of a session.
+message EndSession {
+  // The client ID for this end session.
+  string client_id = 1;
+}

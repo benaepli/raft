@@ -1,3 +1,5 @@
+#include <variant>
+
 #include "serialize.hpp"
 
 #include <spdlog/spdlog.h>
@@ -37,6 +39,20 @@ namespace raft::enhanced
             entry.data = toBytes(proto.data());
             return entry;
         }
+
+        enhanced_protos::EndSession toProto(EndSession const& endSession)
+        {
+            enhanced_protos::EndSession proto;
+            proto.set_client_id(endSession.clientID);
+            return proto;
+        }
+
+        EndSession fromProto(enhanced_protos::EndSession const& proto)
+        {
+            EndSession endSession;
+            endSession.clientID = proto.client_id();
+            return endSession;
+        }
     }  // namespace
 
     std::vector<std::byte> serialize(Entry const& entry)
@@ -51,14 +67,36 @@ namespace raft::enhanced
         return toBytes(serializedEntry);
     }
 
-    tl::expected<Entry, Error> deserialize(std::vector<std::byte> const& data)
+    std::vector<std::byte> serialize(EndSession const& endSession)
     {
-        enhanced_protos::Entry protoEntry;
-        bool success = protoEntry.ParseFromArray(data.data(), static_cast<int>(data.size()));
+        enhanced_protos::EndSession protoEndSession = toProto(endSession);
+        std::string serializedEndSession;
+        bool success = protoEndSession.SerializeToString(&serializedEndSession);
         if (!success)
         {
-            return tl::make_unexpected(errors::Deserialization {});
+            spdlog::error("failed to serialize enhanced EndSession");
         }
-        return fromProto(protoEntry);
+        return toBytes(serializedEndSession);
+    }
+
+    tl::expected<std::variant<Entry, EndSession>, Error> deserialize(
+        std::vector<std::byte> const& data)
+    {
+        enhanced_protos::Entry protoEntry;
+        bool entrySuccess = protoEntry.ParseFromArray(data.data(), static_cast<int>(data.size()));
+        if (entrySuccess)
+        {
+            return fromProto(protoEntry);
+        }
+
+        enhanced_protos::EndSession protoEndSession;
+        bool endSessionSuccess =
+            protoEndSession.ParseFromArray(data.data(), static_cast<int>(data.size()));
+        if (endSessionSuccess)
+        {
+            return fromProto(protoEndSession);
+        }
+
+        return tl::make_unexpected(errors::Deserialization {});
     }
 }  // namespace raft::enhanced

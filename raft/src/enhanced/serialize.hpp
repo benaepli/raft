@@ -24,8 +24,18 @@ namespace raft::enhanced
     /// @return The serialized bytes.
     std::vector<std::byte> serialize(Entry const& entry);
 
-    /// Deserializes bytes to an Entry using protobuf format.
+    /// Ends a session for a client.
+    struct EndSession
+    {
+        std::string clientID;  ///< The client ID to end the session for.
+    };
+
+    std::vector<std::byte> serialize(EndSession const& endSession);
+
+    /// Deserializes bytes to an Entry or an EndSession.
     /// @param data The serialized bytes.
-    /// @return The deserialized Entry or an error.
-    tl::expected<Entry, Error> deserialize(std::vector<std::byte> const& data);
+    /// @return The deserialized Entry or EndSession, or an error.
+    tl::expected<std::variant<Entry, EndSession>, Error> deserialize(
+        std::vector<std::byte> const& data);
+
 }  // namespace raft::enhanced

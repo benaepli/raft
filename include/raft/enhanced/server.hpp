@@ -9,6 +9,17 @@
 
 namespace raft::enhanced
 {
+    /// Information about a client request.
+    ///
+    /// This is used for deduplication. The client ID must be unique, and the request ID must be
+    /// monotonically increasing. For deduplication to function correctly, each request must be
+    /// processed sequentially for a given client ID.
+    struct RequestInfo
+    {
+        std::string clientID;  ///< The client ID for this request.
+        uint64_t requestID;  ///< The request ID for this request.
+    };
+
     /// The callback for when a log entry is committed.
     /// @param data The committed data.
     /// @param local Whether the entry was committed through the commit() function.
@@ -27,6 +38,9 @@ namespace raft::enhanced
     /// @param result The result of the commit operation.
     using LocalCommitCallback = std::function<void(tl::expected<LocalCommitInfo, Error> result)>;
 
+    /// The callback for when a session is ended.
+    using EndSessionCallback = std::function<void(tl::expected<void, Error> result)>;
+
     /// Configuration for creating an enhanced Raft server.
     struct ServerCreateConfig
     {
@@ -35,17 +49,6 @@ namespace raft::enhanced
         std::chrono::nanoseconds commitTimeout = std::chrono::seconds(5);  ///< The commit timeout.
         uint64_t threadCount = 1;  ///< The number of threads to use for timer management.
         std::optional<GlobalCommitCallback> commitCallback;  ///< The commit callback to use.
-    };
-
-    /// Information about a client request.
-    ///
-    /// This is used for deduplication. The client ID must be unique, and the request ID must be
-    /// monotonically increasing. For deduplication to function correctly, each request must be
-    /// processed sequentially for a given client ID.
-    struct RequestInfo
-    {
-        std::string clientID;  ///< The client ID for this request.
-        uint64_t requestID;  ///< The request ID for this request.
     };
 
     class ServerImpl;
@@ -58,6 +61,10 @@ namespace raft::enhanced
     /// in a serialized fashion, so it is important to keep callbacks lightweight. Since
     /// this class maintains a separate queue, it may be inconsistent with the underlying
     /// server instance.
+    ///
+    /// For deduplication, the first commit for a clientID implicitly begins a session. Subsequent
+    /// commit calls operate within this session until endSession() terminates it and cleans
+    /// up deduplication information.
     class Server
     {
       public:
@@ -77,9 +84,10 @@ namespace raft::enhanced
                     const std::vector<std::byte>& value,
                     LocalCommitCallback callback);
 
-        /// Clears the stored deduplication information for a specific client.
+        /// Ends the session for a specific client. The current server must be the leader
+        /// for this to succeed.
         /// @param clientID The client ID to clear from deduplication tracking.
-        void clearClient(std::string const& clientID);
+        void endSession(std::string const& clientID, EndSessionCallback callback);
 
         void setCommitCallback(GlobalCommitCallback callback);
         void clearCommitCallback();

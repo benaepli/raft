@@ -31,8 +31,8 @@ namespace raft::enhanced::typed
         requires Serializable<T, E>
     struct LocalCommitInfo
     {
-        T data;                   ///< The committed typed data.
-        bool duplicate = false;   ///< Whether the entry was a duplicate.
+        T data;  ///< The committed typed data.
+        bool duplicate = false;  ///< Whether the entry was a duplicate.
     };
 
     /// The callback for when a log entry is committed through commit().
@@ -53,9 +53,9 @@ namespace raft::enhanced::typed
     /// Type-safe wrapper around enhanced Raft server providing automatic serialization.
     ///
     /// This wrapper provides the same functionality as raft::enhanced::Server but with
-    /// type safety and automatic serialization/deserialization. All functions are 
-    /// thread-safe. Callbacks are queued and executed in a serialized fashion, so it 
-    /// is important to keep callbacks lightweight. Since this class maintains a separate 
+    /// type safety and automatic serialization/deserialization. All functions are
+    /// thread-safe. Callbacks are queued and executed in a serialized fashion, so it
+    /// is important to keep callbacks lightweight. Since this class maintains a separate
     /// queue, it may be inconsistent with the underlying server instance.
     ///
     /// @tparam T The data type to be committed to the Raft log.
@@ -79,7 +79,7 @@ namespace raft::enhanced::typed
         Server& operator=(Server&&) = default;
 
         /// Commits typed data to the Raft log and monitors leadership and timeouts.
-        /// 
+        ///
         /// The data is automatically serialized before being committed to the underlying
         /// Raft server. The callback receives either the deserialized committed data or
         /// an error (either from Raft operations or deserialization failures).
@@ -117,9 +117,14 @@ namespace raft::enhanced::typed
                 });
         }
 
-        /// Clears the stored deduplication information for a specific client.
+        /// Ends the session for a specific client.
         /// @param clientID The client ID to clear from deduplication tracking.
-        void clearClient(std::string const& clientID) { server_.clearClient(clientID); }
+        /// @param callback The callback to invoke when the session is ended.
+        void endSession(std::string const& clientID,
+                        std::function<void(tl::expected<void, Error>)> callback)
+        {
+            server_.endSession(clientID, std::move(callback));
+        }
 
         /// Sets a global commit callback for all committed entries.
         ///

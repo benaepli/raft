@@ -65,45 +65,27 @@ namespace raft::enhanced
                 .requestID = info.requestID,
                 .data = value,
             };
-            auto appendResult = server_->append(serialize(entry));
-            if (!appendResult)
-            {
-                callback(tl::make_unexpected(appendResult.error()));
-                return;
-            }
-            // appendResult is EntryInfo, which contains entry and index. It is guaranteed to be
-            // unique for each invocation.
-            asio::post(callbackStrand_,
-                       [this, appendResult, callback = std::move(callback)]
-                       {
-                           auto timer = std::make_unique<asio::steady_timer>(threadPool_);
-                           auto localHandler = std::make_shared<LocalHandler>(shared_from_this(),
-                                                                              *appendResult,
-                                                                              std::move(timer),
-                                                                              false,
-                                                                              std::move(callback));
-                           localHandler->timer->expires_from_now(commitTimeout_);
-                           localHandler->timer->async_wait(asio::bind_executor(
-                               callbackStrand_,  // LocalHandler must execute on the strand, since
-                                                 // it accesses the handlers map.
-                               [localHandler](asio::error_code ec) mutable
-                               {
-                                   if (ec)
-                                   {
-                                       return;  // Timer was cancelled
-                                   }
-                                   // This code now runs on the strand
-                                   localHandler->operator()(errors::Timeout());
-                               }));
-
-                           handlers_[*appendResult] = localHandler;
-                           indexToInfo_[appendResult->index].emplace(*appendResult);
-                       });
+            beginCommit(serialize(entry), std::move(callback));
         }
 
-        void clearClient(std::string const& clientID)
+        void endSession(std::string const& clientID, EndSessionCallback callback)
         {
-            asio::post(callbackStrand_, [this, clientID] { lastRequest_.erase(clientID); });
+            auto endSession = EndSession {
+                .clientID = clientID,
+            };
+            LocalCommitCallback localCallback =
+                [callback = std::move(callback)](tl::expected<LocalCommitInfo, Error> result)
+            {
+                if (result.has_value())
+                {
+                    callback({});
+                }
+                else
+                {
+                    callback(tl::make_unexpected(result.error()));
+                }
+            };
+            beginCommit(serialize(endSession), std::move(localCallback));
         }
 
         void setCommitCallback(GlobalCommitCallback callback)
@@ -119,7 +101,46 @@ namespace raft::enhanced
         }
 
       private:
-        void dispatchCommit(EntryInfo const& info, std::vector<std::byte> data, bool duplicate)
+        void beginCommit(std::vector<std::byte> data, LocalCommitCallback callback)
+        {
+            auto appendResult = server_->append(data);
+            if (!appendResult)
+            {
+                callback(tl::make_unexpected(appendResult.error()));
+                return;
+            }
+            // appendResult is EntryInfo, which contains entry and index. It is guaranteed to be
+            // unique for each invocation.
+            asio::post(
+                callbackStrand_,
+                [this, appendResult, callback = std::move(callback)]
+                {
+                    auto timer = std::make_unique<asio::steady_timer>(threadPool_);
+                    auto localHandler = std::make_shared<LocalHandler>(
+                        shared_from_this(), *appendResult, std::move(timer), false, callback);
+                    localHandler->timer->expires_from_now(commitTimeout_);
+                    localHandler->timer->async_wait(asio::bind_executor(
+                        callbackStrand_,  // LocalHandler must execute on the strand, since
+                                          // it accesses the handlers map.
+                        [localHandler](asio::error_code ec) mutable
+                        {
+                            if (ec)
+                            {
+                                return;  // Timer was cancelled
+                            }
+                            // This code now runs on the strand
+                            localHandler->operator()(errors::Timeout());
+                        }));
+
+                    handlers_[*appendResult] = localHandler;
+                    indexToInfo_[appendResult->index].emplace(*appendResult);
+                });
+        }
+
+        void dispatchCommit(EntryInfo const& info,
+                            std::vector<std::byte> data,
+                            bool duplicate,
+                            bool sendGlobal)
         {
             auto it = handlers_.find(info);
             bool found = it != handlers_.end();
@@ -149,10 +170,13 @@ namespace raft::enhanced
                 }
             }
 
-            std::lock_guard lock(callbackMutex_);
-            if (globalCommitCallback_)
+            if (sendGlobal)
             {
-                globalCommitCallback_->operator()(data, found, duplicate);
+                std::lock_guard lock(callbackMutex_);
+                if (globalCommitCallback_)
+                {
+                    globalCommitCallback_->operator()(data, found, duplicate);
+                }
             }
         }
 
@@ -161,23 +185,35 @@ namespace raft::enhanced
             auto deserialized = deserialize(data);
             if (!deserialized)
             {
-                dispatchCommit(info, std::move(data), /*duplicate=*/false);
+                dispatchCommit(info, std::move(data), /*duplicate=*/false, /*sendGlobal=*/true);
                 spdlog::info(
                     "enhanced server [{}] received entry that does not have deduplication info",
                     server_->getId());
                 return;
             }
-            auto lastRequest = lastRequest_.find(deserialized->clientID);
-            if (lastRequest != lastRequest_.end())
+
+            if (auto* entry = std::get_if<enhanced::Entry>(&*deserialized))
             {
-                if (lastRequest->second >= deserialized->requestID)
+                auto lastRequest = lastRequest_.find(entry->clientID);
+                if (lastRequest != lastRequest_.end())
                 {
-                    dispatchCommit(info, std::move(data), /*duplicate=*/true);
-                    return;
+                    if (lastRequest->second >= entry->requestID)
+                    {
+                        dispatchCommit(
+                            info, std::move(data), /*duplicate=*/true, /*sendGlobal=*/true);
+                        return;
+                    }
                 }
+                lastRequest_[entry->clientID] = entry->requestID;
+                dispatchCommit(info, entry->data, /*duplicate=*/false, /*sendGlobal=*/true);
             }
-            lastRequest_[deserialized->clientID] = deserialized->requestID;
-            dispatchCommit(info, deserialized->data, /*duplicate=*/false);
+            else
+            {
+                // The entry is an EndSession.
+                auto endSession = std::get<enhanced::EndSession>(*deserialized);
+                lastRequest_.erase(endSession.clientID);
+                dispatchCommit(info, std::move(data), /*duplicate=*/false, /*sendGlobal=*/false);
+            }
         }
 
         void onLostLeadership()
@@ -231,6 +267,10 @@ namespace raft::enhanced
             if (infos != s->indexToInfo_.end())
             {
                 infos->second.erase(info);
+                if (infos->second.empty())
+                {
+                    s->indexToInfo_.erase(infos);
+                }
             }
         }
     }
@@ -252,9 +292,9 @@ namespace raft::enhanced
         pImpl_->commit(info, value, std::move(callback));
     }
 
-    void Server::clearClient(std::string const& clientID)
+    void Server::endSession(std::string const& clientID, EndSessionCallback callback)
     {
-        pImpl_->clearClient(clientID);
+        pImpl_->endSession(clientID, std::move(callback));
     }
 
     void Server::setCommitCallback(GlobalCommitCallback callback)
