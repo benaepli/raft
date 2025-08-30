@@ -68,6 +68,11 @@ namespace raft::enhanced
             beginCommit(serialize(entry), std::move(callback));
         }
 
+        void commit(const std::vector<std::byte>& value, LocalCommitCallback callback)
+        {
+            beginCommit(value, std::move(callback));
+        }
+
         void endSession(std::string const& clientID, EndSessionCallback callback)
         {
             auto endSession = EndSession {
@@ -186,9 +191,6 @@ namespace raft::enhanced
             if (!deserialized)
             {
                 dispatchCommit(info, std::move(data), /*duplicate=*/false, /*sendGlobal=*/true);
-                spdlog::info(
-                    "enhanced server [{}] received entry that does not have deduplication info",
-                    server_->getId());
                 return;
             }
 
@@ -290,6 +292,11 @@ namespace raft::enhanced
                         LocalCommitCallback callback)
     {
         pImpl_->commit(info, value, std::move(callback));
+    }
+
+    void Server::commit(const std::vector<std::byte>& value, LocalCommitCallback callback)
+    {
+        pImpl_->commit(value, std::move(callback));
     }
 
     void Server::endSession(std::string const& clientID, EndSessionCallback callback)

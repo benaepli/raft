@@ -117,6 +117,44 @@ namespace raft::enhanced::typed
                 });
         }
 
+        /// Commits typed data to the Raft log without deduplication information and monitors
+        /// leadership and timeouts.
+        ///
+        /// The data is automatically serialized before being committed to the underlying
+        /// Raft server. The callback receives either the deserialized committed data or
+        /// an error (either from Raft operations or deserialization failures).
+        ///
+        /// @param value The typed data to commit to the Raft log.
+        /// @param callback The callback to invoke when the commit is completed.
+        void commit(const T& value, LocalCommitCallback<T, E> callback)
+        {
+            auto serialized = serialize(value);
+            server_.commit(
+                serialized,
+                [callback =
+                     std::move(callback)](tl::expected<enhanced::LocalCommitInfo, Error> result)
+                {
+                    if (result.has_value())
+                    {
+                        auto deserialized = deserialize<T>(result->data);
+                        if (deserialized.has_value())
+                        {
+                            LocalCommitInfo<T, E> typedInfo {.data = std::move(*deserialized),
+                                                             .duplicate = result->duplicate};
+                            callback(std::move(typedInfo));
+                        }
+                        else
+                        {
+                            callback(tl::make_unexpected(deserialized.error()));
+                        }
+                    }
+                    else
+                    {
+                        callback(tl::make_unexpected(result.error()));
+                    }
+                });
+        }
+
         /// Ends the session for a specific client.
         /// @param clientID The client ID to clear from deduplication tracking.
         /// @param callback The callback to invoke when the session is ended.

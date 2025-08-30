@@ -76,13 +76,20 @@ namespace raft::enhanced
         Server(Server&&) noexcept;
         Server& operator=(Server&&) noexcept;
 
-        /// Commits data to the Raft log and monitors leadership and timeouts.
+        /// Commits data with deduplicated information to the Raft log and monitors leadership and
+        /// timeouts.
         /// @param info The client and request ID for this request.
         /// @param value The data to commit to the Raft log.
         /// @param callback The callback to invoke when the commit is completed.
         void commit(RequestInfo const& info,
                     const std::vector<std::byte>& value,
                     LocalCommitCallback callback);
+
+        /// Commits data without deduplicated information to the Raft log and monitors leadership
+        /// and timeouts.
+        /// @param value The data to commit to the Raft log.
+        /// @param callback The callback to invoke when the commit is completed.
+        void commit(const std::vector<std::byte>& value, LocalCommitCallback callback);
 
         /// Ends the session for a specific client. The current server must be the leader
         /// for this to succeed.

@@ -1,3 +1,5 @@
+add_subdirectory(proto)
+
 add_executable(raft_cli
         src/main.cpp
 )
@@ -8,4 +10,4 @@ target_include_directories(raft_cli
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
 )
 
-target_link_libraries(raft_cli PRIVATE raft)
+target_link_libraries(raft_cli PRIVATE raft cli_protos)

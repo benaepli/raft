@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package cli_protos;
+
+option cc_generic_services = false;
+option java_generic_services = false;
+option py_generic_services = false;
+
+// The KVStore service provides a simple key-value store interface
+// built on top of a Raft consensus layer.
+service KVStore {
+  // Get retrieves the value for a given key.
+  rpc Get(GetRequest) returns (GetResponse);
+  // Put stores a key-value pair with optional client deduplication.
+  rpc Put(PutRequest) returns (PutResponse);
+  // Delete removes a key-value pair with optional client deduplication.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+// RequestInfo contains client identification for request deduplication.
+//
+// This is used for deduplication. The client ID must be unique, and the request ID must be
+// monotonically increasing. For deduplication to function correctly, each request must be
+// processed sequentially for a given client ID.
+message RequestInfo {
+  // The client ID for this request. Must be unique across all clients.
+  string clientID = 1;
+  // The request ID for this request. Must be monotonically increasing for each client.
+  uint64 requestID = 2;
+}
+
+// The request message for the Get RPC.
+message GetRequest {
+  // The key to retrieve.
+  string key = 1;
+}
+
+// The response message for the Get RPC.
+message GetResponse {
+  // The value associated with the key, or empty if the key does not exist.
+  bytes value = 1;
+  // True if the key was found in the store.
+  bool found = 2;
+}
+
+// The request message for the Put RPC.
+message PutRequest {
+  // The key to store.
+  string key = 1;
+  // The value to associate with the key.
+  bytes value = 2;
+  // Optional request information for client deduplication.
+  // If provided, duplicate requests with the same clientID and requestID
+  // will be ignored to ensure exactly-once semantics.
+  optional RequestInfo request_info = 3;
+}
+
+// The response message for the Put RPC.
+message PutResponse {
+  // True if this was a duplicate request that was ignored.
+  bool duplicate = 1;
+}
+
+// The request message for the Delete RPC.
+message DeleteRequest {
+  // The key to delete.
+  string key = 1;
+  // Optional request information for client deduplication.
+  // If provided, duplicate requests with the same clientID and requestID
+  // will be ignored to ensure exactly-once semantics.
+  optional RequestInfo request_info = 2;
+}
+
+// The response message for the Delete RPC.
+message DeleteResponse {
+  // True if the key existed and was deleted.
+  bool deleted = 1;
+  // True if this was a duplicate request that was ignored.
+  bool duplicate = 2;
+}
