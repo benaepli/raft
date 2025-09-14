@@ -14,6 +14,7 @@ class RaftConan(ConanFile):
         self.requires("spdlog/1.15.3")
         self.requires("sqlitecpp/3.3.2")
         self.requires("tl-expected/1.1.0")
+        self.requires("tomlplusplus/3.4.0")
 
     def layout(self):
         cmake_layout(self)
