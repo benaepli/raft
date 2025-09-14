@@ -7,8 +7,10 @@ class RaftConan(ConanFile):
 
     def requirements(self):
         self.requires("asio/1.30.2")
+        self.requires("argparse/2.1")
         self.requires("grpc/1.72.0")
         self.requires("gtest/1.14.0")
+        self.requires("lyra/1.7.0")
         self.requires("spdlog/1.15.3")
         self.requires("sqlitecpp/3.3.2")
         self.requires("tl-expected/1.1.0")

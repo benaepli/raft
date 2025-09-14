@@ -3,7 +3,7 @@
 
 namespace raft_cli
 {
-    void serve(std::string configPath, std::string nodeID)
+    inline void serve(std::string configPath, std::string nodeID)
     {
         auto config = config::loadConfig(configPath);
         if (!config)

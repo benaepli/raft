@@ -6,6 +6,9 @@
 #include <fmt/core.h>
 #include <fmt/std.h>
 
+#include "raft/errors.hpp"
+#include "raft/fmt/errors.hpp"
+
 namespace raft_cli
 {
     namespace errors
@@ -19,9 +22,12 @@ namespace raft_cli
         {
             std::optional<std::string> leaderAddress;
         };
+
+        using raft::errors::Unknown;
+
     }  // namespace errors
 
-    using Error = std::variant<errors::ConfigError, errors::NotLeader>;
+    using Error = std::variant<errors::ConfigError, errors::NotLeader, errors::Unknown>;
 }  // namespace raft_cli
 
 template<>
