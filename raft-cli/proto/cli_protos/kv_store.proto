@@ -90,3 +90,15 @@ message EndSessionRequest {
 
 // The response message for the EndSession RPC.
 message EndSessionResponse {}
+
+message NotLeaderError {
+  // The address of the leader node, if known.
+  optional string leader_address = 1;
+}
+
+message ErrorDetails {
+  oneof error {
+    // The node is not the leader.
+    NotLeaderError not_leader_error = 1;
+  }
+}

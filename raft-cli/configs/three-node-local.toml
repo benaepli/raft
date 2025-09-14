@@ -1,0 +1,22 @@
+[settings]
+election_timeout_ms = 1000
+heartbeat_interval_ms = 100
+data_directory = "/tmp/raft-data"
+
+[[cluster.nodes]]
+id = "node-1"
+address = "127.0.0.1"
+kv_port = 10100
+raft_port = 10101
+
+[[cluster.nodes]]
+id = "node-2"
+address = "127.0.0.1"
+kv_port = 10200
+raft_port = 10201
+
+[[cluster.nodes]]
+id = "node-3"
+address = "127.0.0.1"
+kv_port = 10300
+raft_port = 10301
