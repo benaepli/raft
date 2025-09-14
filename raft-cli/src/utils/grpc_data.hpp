@@ -9,16 +9,16 @@
 
 namespace raft_cli::store::data
 {
-    inline std::vector<std::byte> toBytes(const std::string& str)
+    inline std::vector<std::byte> toBytes(std::string const& str)
     {
         std::vector<std::byte> bytes(str.size());
         std::memcpy(bytes.data(), str.c_str(), str.size());
         return bytes;
     }
 
-    inline std::string toString(const std::vector<std::byte>& bytes)
+    inline std::string toString(std::vector<std::byte> const& bytes)
     {
-        return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+        return {reinterpret_cast<char const*>(bytes.data()), bytes.size()};
     }
 
     // RequestInfo conversions
@@ -30,7 +30,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline RequestInfo fromProto(const cli_protos::RequestInfo& proto)
+    inline RequestInfo fromProto(cli_protos::RequestInfo const& proto)
     {
         return RequestInfo {
             .clientID = proto.clientid(),
@@ -46,7 +46,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline GetRequest fromProto(const cli_protos::GetRequest& proto)
+    inline GetRequest fromProto(cli_protos::GetRequest const& proto)
     {
         return GetRequest {
             .key = proto.key(),
@@ -62,7 +62,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline GetResponse fromProto(const cli_protos::GetResponse& proto)
+    inline GetResponse fromProto(cli_protos::GetResponse const& proto)
     {
         return GetResponse {
             .value = toBytes(proto.value()),
@@ -83,7 +83,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline PutRequest fromProto(const cli_protos::PutRequest& proto)
+    inline PutRequest fromProto(cli_protos::PutRequest const& proto)
     {
         PutRequest request {
             .key = proto.key(),
@@ -104,7 +104,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline PutResponse fromProto(const cli_protos::PutResponse& proto)
+    inline PutResponse fromProto(cli_protos::PutResponse const& proto)
     {
         return PutResponse {
             .duplicate = proto.duplicate(),
@@ -123,7 +123,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline DeleteRequest fromProto(const cli_protos::DeleteRequest& proto)
+    inline DeleteRequest fromProto(cli_protos::DeleteRequest const& proto)
     {
         DeleteRequest request {
             .key = proto.key(),
@@ -144,7 +144,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline DeleteResponse fromProto(const cli_protos::DeleteResponse& proto)
+    inline DeleteResponse fromProto(cli_protos::DeleteResponse const& proto)
     {
         return DeleteResponse {
             .deleted = proto.deleted(),
@@ -160,7 +160,7 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline EndSessionRequest fromProto(const cli_protos::EndSessionRequest& proto)
+    inline EndSessionRequest fromProto(cli_protos::EndSessionRequest const& proto)
     {
         return EndSessionRequest {
             .clientID = proto.clientid(),
@@ -174,9 +174,102 @@ namespace raft_cli::store::data
         return proto;
     }
 
-    inline EndSessionResponse fromProto(const cli_protos::EndSessionResponse& proto)
+    inline EndSessionResponse fromProto(cli_protos::EndSessionResponse const& proto)
     {
         return EndSessionResponse {};
+    }
+
+    // PutCommand conversions
+    inline cli_protos::PutCommand toProto(PutCommand const& command)
+    {
+        cli_protos::PutCommand proto;
+        proto.set_key(command.key);
+        proto.set_value(toString(command.value));
+        return proto;
+    }
+
+    inline PutCommand fromProto(cli_protos::PutCommand const& proto)
+    {
+        return PutCommand {
+            .key = proto.key(),
+            .value = toBytes(proto.value()),
+        };
+    }
+
+    // DeleteCommand conversions
+    inline cli_protos::DeleteCommand toProto(DeleteCommand const& command)
+    {
+        cli_protos::DeleteCommand proto;
+        proto.set_key(command.key);
+        return proto;
+    }
+
+    inline DeleteCommand fromProto(cli_protos::DeleteCommand const& proto)
+    {
+        return DeleteCommand {
+            .key = proto.key(),
+        };
+    }
+
+    // EmptyCommand conversions
+    inline cli_protos::EmptyCommand toProto(EmptyCommand const& command)
+    {
+        cli_protos::EmptyCommand proto;
+        return proto;
+    }
+
+    inline EmptyCommand fromProto(cli_protos::EmptyCommand const& proto)
+    {
+        return EmptyCommand {};
+    }
+
+    // Command conversions
+    inline cli_protos::Command toProto(Command const& command)
+    {
+        cli_protos::Command proto;
+
+        std::visit(
+            [&proto](auto const& cmd)
+            {
+                using T = std::decay_t<decltype(cmd)>;
+                if constexpr (std::is_same_v<T, PutCommand>)
+                {
+                    *proto.mutable_put() = toProto(cmd);
+                }
+                else if constexpr (std::is_same_v<T, DeleteCommand>)
+                {
+                    *proto.mutable_delete_() = toProto(cmd);
+                }
+                else if constexpr (std::is_same_v<T, EmptyCommand>)
+                {
+                    *proto.mutable_empty() = toProto(cmd);
+                }
+            },
+            command);
+
+        return proto;
+    }
+
+    inline Command fromProto(cli_protos::Command const& proto)
+    {
+        switch (proto.command_case())
+        {
+            case cli_protos::Command::kPut:
+                return fromProto(proto.put());
+            case cli_protos::Command::kDelete:
+                return fromProto(proto.delete_());
+            case cli_protos::Command::kEmpty:
+                return fromProto(proto.empty());
+            case cli_protos::Command::COMMAND_NOT_SET:
+                return EmptyCommand {};
+        }
+        return EmptyCommand {};
+    }
+
+    inline std::vector<std::byte> toBytes(cli_protos::Command const& command)
+    {
+        auto str = command.SerializeAsString();
+        return toBytes(str);
     }
 
 }  // namespace raft_cli::store::data

@@ -13,7 +13,7 @@ namespace raft_cli::config
             Settings settings;
 
             // Use defaults
-            settings.electionTimeout = DEFAULT_ELECTION_TIMEOUT;
+            settings.electionTimeoutInterval = DEFAULT_ELECTION_TIMEOUT_INTERVAL;
             settings.heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
 
             auto settingsTable = config["settings"].as_table();
@@ -23,16 +23,26 @@ namespace raft_cli::config
                     errors::ConfigError {"missing [settings] section in config file"});
             }
 
-            // Parse election_timeout_ms (optional, use default if not specified)
-            if (auto electionTimeoutNode = (*settingsTable)["election_timeout_ms"])
+            // Parse min_election_timeout_ms (optional, use default if not specified)
+            if (auto minTimeoutNode = (*settingsTable)["min_election_timeout_ms"])
             {
-                if (!electionTimeoutNode.as_integer())
+                if (!minTimeoutNode.as_integer())
                 {
                     return tl::unexpected(errors::ConfigError {
-                        "invalid election_timeout_ms in [settings] - must be an integer"});
+                        "invalid min_election_timeout_ms in [settings] - must be an integer"});
                 }
-                settings.electionTimeout =
-                    std::chrono::milliseconds(electionTimeoutNode.as_integer()->get());
+                settings.electionTimeoutInterval.min = minTimeoutNode.as_integer()->get();
+            }
+
+            // Parse max_election_timeout_ms (optional, use default if not specified)
+            if (auto maxTimeoutNode = (*settingsTable)["max_election_timeout_ms"])
+            {
+                if (!maxTimeoutNode.as_integer())
+                {
+                    return tl::unexpected(errors::ConfigError {
+                        "invalid max_election_timeout_ms in [settings] - must be an integer"});
+                }
+                settings.electionTimeoutInterval.max = maxTimeoutNode.as_integer()->get();
             }
 
             // Parse heartbeat_interval_ms (optional, use default if not specified)

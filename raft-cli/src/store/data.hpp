@@ -3,7 +3,10 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
+
+#include <tl/expected.hpp>
 
 namespace raft_cli::store::data
 {
@@ -88,5 +91,34 @@ namespace raft_cli::store::data
     {
         bool operator==(EndSessionResponse const& other) const = default;
     };
+
+    /// Command for putting a key-value pair.
+    struct PutCommand
+    {
+        std::string key;  ///< The key to store.
+        std::vector<std::byte> value;  ///< The value to associate with the key.
+
+        bool operator==(PutCommand const& other) const = default;
+    };
+
+    /// Command for deleting a key.
+    struct DeleteCommand
+    {
+        std::string key;  ///< The key to delete.
+
+        bool operator==(DeleteCommand const& other) const = default;
+    };
+
+    /// Empty command for no-op operations.
+    struct EmptyCommand
+    {
+        bool operator==(EmptyCommand const& other) const = default;
+    };
+
+    /// Command variant that can hold any of the supported command types.
+    using Command = std::variant<PutCommand, DeleteCommand, EmptyCommand>;
+
+    std::vector<std::byte> serialize(Command const& command);
+    tl::expected<Command, std::string> deserialize(std::vector<std::byte> const& bytes);
 
 }  // namespace raft_cli::store::data

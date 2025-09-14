@@ -14,6 +14,8 @@ add_executable(raft_cli
         src/store/data.hpp
         src/utils/grpc_data.hpp
         src/utils/grpc_errors.hpp
+        src/store/data.cpp
+        src/store/server.cpp
 )
 
 target_include_directories(raft_cli

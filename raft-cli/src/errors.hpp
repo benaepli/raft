@@ -23,11 +23,13 @@ namespace raft_cli
             std::optional<std::string> leaderAddress;
         };
 
+        using raft::errors::Deserialization;
         using raft::errors::Unknown;
 
     }  // namespace errors
 
-    using Error = std::variant<errors::ConfigError, errors::NotLeader, errors::Unknown>;
+    using Error = std::
+        variant<errors::ConfigError, errors::NotLeader, errors::Unknown, errors::Deserialization>;
 }  // namespace raft_cli
 
 template<>

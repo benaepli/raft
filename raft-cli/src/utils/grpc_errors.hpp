@@ -13,7 +13,7 @@ namespace raft_cli::errors
     template<class... Ts>
     overloaded(Ts...) -> overloaded<Ts...>;
 
-    inline Error fromGrpcStatus(const grpc::Status& status)
+    inline Error fromGrpcStatus(grpc::Status const& status)
     {
         cli_protos::ErrorDetails details;
         if (details.ParseFromString(status.error_details()))
@@ -42,30 +42,31 @@ namespace raft_cli::errors
         }
     }
 
-    inline grpc::Status toGrpcStatus(const Error& error)
+    inline grpc::Status toGrpcStatus(Error const& error)
     {
         return std::visit(
-            overloaded {[](ConfigError const& e)
-                        { return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, e.message); },
-                        [](NotLeader const& e)
-                        {
-                            cli_protos::ErrorDetails details;
-                            auto* notLeaderError = details.mutable_not_leader_error();
-                            if (e.leaderAddress.has_value())
-                            {
-                                notLeaderError->set_leader_address(*e.leaderAddress);
-                            }
+            overloaded {
+                [](ConfigError const& e)
+                { return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, e.message); },
+                [](NotLeader const& e)
+                {
+                    cli_protos::ErrorDetails details;
+                    auto* notLeaderError = details.mutable_not_leader_error();
+                    if (e.leaderAddress.has_value())
+                    {
+                        notLeaderError->set_leader_address(*e.leaderAddress);
+                    }
 
-                            std::string serializedDetails;
-                            details.SerializeToString(&serializedDetails);
+                    std::string serializedDetails;
+                    details.SerializeToString(&serializedDetails);
 
-                            grpc::Status status(grpc::StatusCode::FAILED_PRECONDITION,
-                                                "not leader");
-                            return grpc::Status(
-                                status.error_code(), status.error_message(), serializedDetails);
-                        },
-                        [](Unknown const& e)
-                        { return grpc::Status(grpc::StatusCode::UNKNOWN, e.message); }},
+                    grpc::Status status(grpc::StatusCode::FAILED_PRECONDITION, "not leader");
+                    return grpc::Status(
+                        status.error_code(), status.error_message(), serializedDetails);
+                },
+                [](Unknown const& e) { return grpc::Status(grpc::StatusCode::UNKNOWN, e.message); },
+                [](Deserialization const&)
+                { return grpc::Status(grpc::StatusCode::INTERNAL, "deserialization error"); }},
             error);
     }
 }  // namespace raft_cli::errors

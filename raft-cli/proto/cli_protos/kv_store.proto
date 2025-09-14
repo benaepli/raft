@@ -102,3 +102,22 @@ message ErrorDetails {
     NotLeaderError not_leader_error = 1;
   }
 }
+
+message PutCommand {
+  string key = 1;
+  bytes value = 2;
+}
+
+message DeleteCommand {
+  string key = 1;
+}
+
+message EmptyCommand {}
+
+message Command {
+  oneof command {
+    PutCommand put = 1;
+    DeleteCommand delete = 2;
+    EmptyCommand empty = 3;
+  }
+}

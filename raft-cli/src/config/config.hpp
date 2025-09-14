@@ -8,10 +8,11 @@
 #include <tl/expected.hpp>
 
 #include "../errors.hpp"
+#include "raft/server.hpp"
 
 namespace raft_cli::config
 {
-    constexpr std::chrono::nanoseconds DEFAULT_ELECTION_TIMEOUT = std::chrono::milliseconds(1000);
+    constexpr raft::TimeoutInterval DEFAULT_ELECTION_TIMEOUT_INTERVAL = {.min = 1000, .max = 2000};
     constexpr std::chrono::nanoseconds DEFAULT_HEARTBEAT_INTERVAL = std::chrono::milliseconds(100);
 
     struct Node
@@ -24,7 +25,7 @@ namespace raft_cli::config
 
     struct Settings
     {
-        std::chrono::nanoseconds electionTimeout;
+        raft::TimeoutInterval electionTimeoutInterval;
         std::chrono::nanoseconds heartbeatInterval;
         std::string dataDirectory;
     };
