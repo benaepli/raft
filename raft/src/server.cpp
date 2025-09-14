@@ -960,7 +960,7 @@ namespace raft
 
             PersistedTransaction transaction;
             transaction.setTerm(newTerm);
-            if (auto error = persister_->apply(transaction); error)
+            if (auto error = persister_->apply(transaction); !error)
             {
                 spdlog::error("[{}] failed to persist term update: {}", id_, error.error());
                 return;
@@ -978,7 +978,7 @@ namespace raft
 
             PersistedTransaction transaction;
             transaction.setVotedFor(newVotedFor);
-            if (auto error = persister_->apply(transaction); error)
+            if (auto error = persister_->apply(transaction); !error)
             {
                 spdlog::error("[{}] failed to persist votedFor update: {}", id_, error.error());
                 return;

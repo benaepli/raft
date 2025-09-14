@@ -80,20 +80,7 @@ namespace raft::fs
 
                     if (query.executeStep())
                     {
-                        uint64_t term = static_cast<uint64_t>(query.getColumn(0).getInt64());
-                        int entryType = query.getColumn(1).getInt();
-
-                        if (entryType == 1)  // NoOp entry
-                        {
-                            return data::LogEntry {.term = term, .entry = data::NoOp {}};
-                        }
-                        SQLite::Column blobColumn = query.getColumn(2);
-                        const void* data = blobColumn.getBlob();
-                        const int size = blobColumn.getBytes();
-
-                        const auto* begin = static_cast<const std::byte*>(data);
-                        std::vector<std::byte> entryData(begin, begin + size);
-                        return data::LogEntry {.term = term, .entry = std::move(entryData)};
+                        return queryToEntry(query);
                     }
                 }
                 catch (const std::exception& e)
@@ -102,6 +89,26 @@ namespace raft::fs
                         "[{}] failed to get entry at index {}: {}", path_, index, e.what());
                 }
                 return std::nullopt;
+            }
+
+            [[nodiscard]] std::vector<data::LogEntry> getEntries() const override
+            {
+                std::vector<data::LogEntry> entries;
+                try
+                {
+                    SQLite::Statement query(
+                        *db_, "SELECT term, entry_type, entry FROM log_entries ORDER BY log_index");
+
+                    while (query.executeStep())
+                    {
+                        entries.emplace_back(queryToEntry(query));
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    spdlog::error("[{}] failed to get entries: {}", path_, e.what());
+                }
+                return entries;
             }
 
             [[nodiscard]] std::optional<uint64_t> getLastTerm() const override
@@ -213,6 +220,25 @@ namespace raft::fs
             }
 
           private:
+            static data::LogEntry queryToEntry(SQLite::Statement& query)
+            {
+                uint64_t term = static_cast<uint64_t>(query.getColumn(0).getInt64());
+                int entryType = query.getColumn(1).getInt();
+
+                if (entryType == 1)  // NoOp entry
+                {
+                    return data::LogEntry {.term = term, .entry = data::NoOp {}};
+                }
+
+                SQLite::Column blobColumn = query.getColumn(2);
+                const void* data = blobColumn.getBlob();
+                const int size = blobColumn.getBytes();
+
+                const auto* begin = static_cast<const std::byte*>(data);
+                std::vector<std::byte> entryData(begin, begin + size);
+                return data::LogEntry {.term = term, .entry = std::move(entryData)};
+            }
+
             std::string path_;
             std::optional<SQLite::Database> db_;
         };

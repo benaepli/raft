@@ -16,6 +16,13 @@ namespace raft::impl
                          entry.entry);
     }
 
+    Log::Log(std::shared_ptr<Persister> persister)
+        : persister_(std::move(persister))
+    {
+        entries_ = persister_->getEntries();
+        baseIndex_ = persister_->getBaseIndex().value_or(1);
+    }
+
     data::LogEntry* Log::get(uint64_t index)
     {
         if (index < baseIndex_)
@@ -123,7 +130,7 @@ namespace raft::impl
         }
         PersistedTransaction transaction;
         transaction.store(startIndex, newEntries);
-        if (auto error = persister_->apply(transaction); error)
+        if (auto error = persister_->apply(transaction); !error.has_value())
         {
             spdlog::error("[Log] failed to apply transaction: {}", error.error());
             return;
@@ -148,9 +155,9 @@ namespace raft::impl
         transaction.store(lastIndex() + 1,
                           {data::LogEntry {
                               .term = term,
-                              .entry = std::move(data),
+                              .entry = data,
                           }});
-        if (auto error = persister_->apply(transaction); error)
+        if (auto error = persister_->apply(transaction); !error.has_value())
         {
             spdlog::error("[Log] failed to apply transaction: {}", error.error());
         }
@@ -172,7 +179,7 @@ namespace raft::impl
                               .term = term,
                               .entry = data::NoOp {},
                           }});
-        if (auto error = persister_->apply(transaction); error)
+        if (auto error = persister_->apply(transaction); !error)
         {
             spdlog::error("[Log] failed to apply transaction: {}", error.error());
         }

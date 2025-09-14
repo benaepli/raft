@@ -66,15 +66,34 @@ namespace raft
     };
 
     /// The interface for persisting the Raft server's state.
+    ///
+    /// This interface defines the contract for persistent storage of Raft state including
+    /// metadata (current term, voted for) and log entries. Implementations must provide
+    /// atomic transactions and consistent read operations to maintain Raft correctness.
     struct Persister
     {
         virtual ~Persister() = default;
 
+        /// Gets the base index of the log.
+        /// @return The base index if available, std::nullopt if unset.
         [[nodiscard]] virtual std::optional<uint64_t> getBaseIndex() = 0;
+
+        /// Retrieves a single log entry at the specified index.
+        /// @param index The log index to retrieve.
+        /// @return The log entry if found, std::nullopt if not found.
         [[nodiscard]] virtual std::optional<data::LogEntry> getEntry(uint64_t index) const = 0;
 
+        /// Retrieves all log entries in index order.
+        /// @return Vector of all log entries.
+        [[nodiscard]] virtual std::vector<data::LogEntry> getEntries() const = 0;
+
+        /// Gets the term of the last log entry.
+        /// @return The last term if available, std::nullopt if no entries exist.
         [[nodiscard]] virtual std::optional<uint64_t> getLastTerm() const = 0;
 
+        /// Applies a set of state changes to persistent storage.
+        /// @param transaction The transaction containing state changes to persist.
+        /// @return Success or error result of the persistence operation.
         virtual tl::expected<void, Error> apply(PersistedTransaction const& transaction) = 0;
     };
 }  // namespace raft

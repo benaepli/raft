@@ -15,6 +15,9 @@ service KVStore {
   rpc Put(PutRequest) returns (PutResponse);
   // Delete removes a key-value pair with optional client deduplication.
   rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // EndSession ends the client session.
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
 }
 
 // RequestInfo contains client identification for request deduplication.
@@ -78,3 +81,12 @@ message DeleteResponse {
   // True if this was a duplicate request that was ignored.
   bool duplicate = 2;
 }
+
+// The request message for the EndSession RPC.
+message EndSessionRequest {
+  // The client ID for this request. Must be unique across all clients.
+  string clientID = 1;
+}
+
+// The response message for the EndSession RPC.
+message EndSessionResponse {}

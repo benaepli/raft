@@ -8,7 +8,7 @@ namespace raft::testing
     {
       public:
         NoOpPersister() = default;
-        ~NoOpPersister() override;
+        ~NoOpPersister() override = default;
 
         [[nodiscard]] std::optional<uint64_t> getBaseIndex() override { return 1; }
         [[nodiscard]] std::optional<data::LogEntry> getEntry(uint64_t index) const override
@@ -21,5 +21,6 @@ namespace raft::testing
         {
             return {};
         }
+        [[nodiscard]] std::vector<data::LogEntry> getEntries() const override { return {}; }
     };
 }  // namespace raft::testing
