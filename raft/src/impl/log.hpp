@@ -2,19 +2,14 @@
 
 #include <vector>
 
-#include "raft/client.hpp"
+#include "raft/data.hpp"
 #include "raft/server.hpp"
 
 namespace raft::impl
 {
     struct Log
     {
-        std::vector<data::LogEntry> entries;
-        // The index of the first entry in the log.
-        // For instance, if the log contains entries with indices 10, 11, and 12, then baseIndex
-        // will be 10.
-        // This should be at least 1.
-        uint64_t baseIndex = 1;
+        explicit Log(std::shared_ptr<Persister> persister);
 
         [[nodiscard]] data::LogEntry* get(uint64_t index);
 
@@ -39,7 +34,17 @@ namespace raft::impl
         EntryInfo appendOne(uint64_t term, std::vector<std::byte> data);
         void appendNoOp(uint64_t term);
 
+        // Returns the total number of bytes used by the log.
+        [[nodiscard]] size_t bytes() const;
+
       private:
+        std::shared_ptr<Persister> persister_;
+
+        // An in-memory copy of the log entries.
+        std::vector<data::LogEntry> entries_;
+        // The index of the first entry in the log.
+        uint64_t baseIndex_ = 1;
+
         // Returns true if the new entries are conflicting with the existing entries.
         [[nodiscard]] bool isConflicting(size_t offset,
                                          const std::vector<data::LogEntry>& newEntries) const;

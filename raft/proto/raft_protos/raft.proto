@@ -74,13 +74,3 @@ message RequestVoteResponse {
   // True if the candidate received a vote.
   bool vote_granted = 2;
 }
-
-// The persisted state of the Raft replica.
-message PersistedState {
-  // The current term.
-  int64 term = 1;
-  // The log entries.
-  repeated LogEntry entries = 2;
-  // The ID of the leader that the replica voted for in the current term, or null if it has not voted.
-  optional string voted_for = 3;
-}

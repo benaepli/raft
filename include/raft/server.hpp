@@ -5,6 +5,7 @@
 
 #include "impl/hash.h"
 #include "raft/client.hpp"
+#include "raft/data.hpp"
 #include "raft/persister.hpp"
 
 namespace raft

@@ -40,7 +40,6 @@ namespace raft
 
     struct FollowerInfo
     {
-        std::optional<std::string> votedFor;
     };
 
     using State = std::variant<CandidateInfo, LeaderInfo, FollowerInfo>;
@@ -96,6 +95,6 @@ struct fmt::formatter<raft::FollowerInfo>
     template<typename FormatContext>
     auto format(const raft::FollowerInfo& info, FormatContext& ctx) const
     {
-        return fmt::format_to(ctx.out(), "{{votedFor: {}}}", info.votedFor);
+        return fmt::format_to(ctx.out(), "{{}}");
     }
 };

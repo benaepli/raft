@@ -1,32 +1,25 @@
 #pragma once
 
-#include <gmock/gmock.h>
-#include <tl/expected.hpp>
-
 #include "raft/persister.hpp"
 
 namespace raft::testing
 {
-    class MockPersister : public Persister
+    class NoOpPersister final : public raft::Persister
     {
       public:
-        MOCK_METHOD((tl::expected<void, Error>),
-                    saveState,
-                    (std::vector<std::byte> state),
-                    (noexcept, override));
-        MOCK_METHOD((tl::expected<std::vector<std::byte>, Error>), loadState, (), (noexcept, override));
-    };
+        NoOpPersister() = default;
+        ~NoOpPersister() override;
 
-    class NoOpPersister : public raft::Persister
-    {
-      public:
-        tl::expected<void, Error> saveState(std::vector<std::byte> state) noexcept override
+        [[nodiscard]] std::optional<uint64_t> getBaseIndex() override { return 1; }
+        [[nodiscard]] std::optional<data::LogEntry> getEntry(uint64_t index) const override
         {
             return {};
         }
-        tl::expected<std::vector<std::byte>, Error> loadState() noexcept override 
-        { 
-            return tl::make_unexpected(errors::NoPersistedState{}); 
+        [[nodiscard]] std::optional<uint64_t> getLastTerm() const override { return {}; }
+
+        tl::expected<void, Error> apply(const PersistedTransaction& transaction) override
+        {
+            return {};
         }
     };
 }  // namespace raft::testing

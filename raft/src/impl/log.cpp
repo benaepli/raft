@@ -2,39 +2,51 @@
 
 #include <spdlog/spdlog.h>
 
+#include "raft/fmt/errors.hpp"
+#include "utils/grpc_errors.hpp"
+
 namespace raft::impl
 {
+    size_t calculateSize(const data::LogEntry& entry)
+    {
+        return sizeof(entry.term)
+            + std::visit(errors::overloaded {[](const std::vector<std::byte>& data)
+                                             { return data.size(); },
+                                             [](const data::NoOp&) { return sizeof(data::NoOp); }},
+                         entry.entry);
+    }
+
     data::LogEntry* Log::get(uint64_t index)
     {
-        if (index < baseIndex)
+        if (index < baseIndex_)
         {
             return nullptr;
         }
-        size_t offset = index - baseIndex;
-        if (offset >= entries.size())
+        size_t offset = index - baseIndex_;
+        if (offset >= entries_.size())
         {
             return nullptr;
         }
-        return &entries[offset];
+        return &entries_[offset];
     }
 
     data::LogEntry const* Log::get(uint64_t index) const
     {
-        if (index < baseIndex)
+        if (index < baseIndex_)
         {
             return nullptr;
         }
-        size_t offset = index - baseIndex;
-        if (offset >= entries.size())
+        size_t offset = index - baseIndex_;
+        if (offset >= entries_.size())
         {
             return nullptr;
         }
-        return &entries[offset];
+        return &entries_[offset];
     }
 
     uint64_t Log::lastIndex() const
     {
-        return baseIndex + entries.size() - 1;
+        return baseIndex_ + entries_.size() - 1;
     }
 
     uint64_t Log::lastTerm() const
@@ -86,7 +98,7 @@ namespace raft::impl
     {
         for (size_t i = 0; i < newEntries.size(); i++)
         {
-            if (entries[offset + i].term != newEntries[i].term)
+            if (entries_[offset + i].term != newEntries[i].term)
             {
                 return true;
             }
@@ -96,49 +108,90 @@ namespace raft::impl
 
     void Log::store(uint64_t startIndex, const std::vector<data::LogEntry>& newEntries)
     {
-        if (startIndex < baseIndex)
-        {
-            spdlog::error("[Log] start index {} is less than base index {}", startIndex, baseIndex);
-            return;
-        }
-        size_t offset = startIndex - baseIndex;
-        if (offset > entries.size())
+        if (startIndex < baseIndex_)
         {
             spdlog::error(
-                "[Log] start index {} is greater than log size {}", startIndex, entries.size());
+                "[Log] start index {} is less than base index {}", startIndex, baseIndex_);
             return;
         }
-        auto minSize = offset + newEntries.size();
-        if (minSize > entries.size() || isConflicting(offset, newEntries))
+        size_t offset = startIndex - baseIndex_;
+        if (offset > entries_.size())
         {
-            // If the new entries conflict with the existing ones, we have to erase the old ones.
-            entries.resize(minSize);
+            spdlog::error(
+                "[Log] start index {} is greater than log size {}", startIndex, entries_.size());
+            return;
+        }
+        PersistedTransaction transaction;
+        transaction.store(startIndex, newEntries);
+        if (auto error = persister_->apply(transaction); error)
+        {
+            spdlog::error("[Log] failed to apply transaction: {}", error.error());
+            return;
+        }
+
+        auto minSize = offset + newEntries.size();
+        if (minSize > entries_.size() || isConflicting(offset, newEntries))
+        {
+            // If the new entries_ conflict with the existing ones, we have to erase the old ones.
+            entries_.resize(minSize);
         }
 
         for (size_t i = 0; i < newEntries.size(); i++)
         {
-            entries[offset + i] = newEntries[i];
+            entries_[offset + i] = newEntries[i];
         }
     }
 
     EntryInfo Log::appendOne(uint64_t term, std::vector<std::byte> data)
     {
+        PersistedTransaction transaction;
+        transaction.store(lastIndex() + 1,
+                          {data::LogEntry {
+                              .term = term,
+                              .entry = std::move(data),
+                          }});
+        if (auto error = persister_->apply(transaction); error)
+        {
+            spdlog::error("[Log] failed to apply transaction: {}", error.error());
+        }
+
         auto index = lastIndex() + 1;
         auto entry = data::LogEntry {
             .term = term,
             .entry = std::move(data),
         };
-        entries.push_back(entry);
+        entries_.push_back(entry);
         return {.index = index, .term = term};
     }
 
     void Log::appendNoOp(uint64_t term)
     {
+        PersistedTransaction transaction;
+        transaction.store(lastIndex() + 1,
+                          {data::LogEntry {
+                              .term = term,
+                              .entry = data::NoOp {},
+                          }});
+        if (auto error = persister_->apply(transaction); error)
+        {
+            spdlog::error("[Log] failed to apply transaction: {}", error.error());
+        }
+
         auto entry = data::LogEntry {
             .term = term,
             .entry = data::NoOp {},
         };
-        entries.push_back(entry);
+        entries_.push_back(entry);
+    }
+
+    size_t Log::bytes() const
+    {
+        size_t size = 0;
+        for (const auto& entry : entries_)
+        {
+            size += calculateSize(entry);
+        }
+        return size;
     }
 
 }  // namespace raft::impl

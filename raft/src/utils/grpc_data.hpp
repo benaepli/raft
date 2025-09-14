@@ -1,8 +1,7 @@
 #pragma once
 
-#include "raft/client.hpp"
+#include "raft/data.hpp"
 #include "raft_protos/raft.pb.h"
-#include "serialize.hpp"
 
 namespace raft::data
 {
@@ -145,34 +144,4 @@ namespace raft::data
         };
     }
 
-    inline raft_protos::PersistedState toProto(PersistedState const& state)
-    {
-        raft_protos::PersistedState proto;
-        proto.set_term(static_cast<int64_t>(state.term));
-        for (auto const& entry : state.entries)
-        {
-            *proto.add_entries() = toProto(entry);
-        }
-        if (state.votedFor.has_value())
-        {
-            proto.set_voted_for(*state.votedFor);
-        }
-        return proto;
-    }
-
-    inline PersistedState fromProto(const raft_protos::PersistedState& proto)
-    {
-        PersistedState state {
-            .term = static_cast<uint64_t>(proto.term()),
-        };
-        for (auto const& entry : proto.entries())
-        {
-            state.entries.push_back(fromProto(entry));
-        }
-        if (proto.has_voted_for())
-        {
-            state.votedFor = proto.voted_for();
-        }
-        return state;
-    }
 }  // namespace raft::data

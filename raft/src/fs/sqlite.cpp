@@ -4,28 +4,44 @@
 
 #include "SQLiteCpp/Database.h"
 #include "SQLiteCpp/Transaction.h"
+#include "raft/data.hpp"
 
 namespace raft::fs
 {
     namespace
     {
-        class SQLitePersister final : public raft::Persister
+        class SQLitePersister final : public Persister
         {
           public:
             explicit SQLitePersister(const std::string& path)
                 : path_(path)
             {
             }
+
             tl::expected<void, Error> init()
             {
                 try
                 {
                     db_ = SQLite::Database(path_, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-                    // We use a simple key-value structure where the key (id=1) is always the same.
                     db_->exec(
-                        "CREATE TABLE IF NOT EXISTS raft_state ("
-                        "id INTEGER PRIMARY KEY, "
-                        "state BLOB NOT NULL);");
+                        "CREATE TABLE IF NOT EXISTS raft_metadata ("
+                        "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                        "current_term INTEGER NOT NULL,"
+                        "voted_for TEXT,"
+                        "base_index INTEGER NOT NULL DEFAULT 1);");
+
+                    db_->exec(
+                        "CREATE TABLE IF NOT EXISTS log_entries ("
+                        "log_index INTEGER PRIMARY KEY,"
+                        "term INTEGER NOT NULL,"
+                        "entry_type INTEGER NOT NULL DEFAULT 0,"
+                        "entry BLOB);");
+
+                    // Initialize metadata if it doesn't exist
+                    // This will only insert if no row with id=1 exists
+                    db_->exec(
+                        "INSERT OR IGNORE INTO raft_metadata (id, current_term, base_index) "
+                        "VALUES (1, 0, 1);");
                 }
                 catch (const SQLite::Exception& e)
                 {
@@ -35,63 +51,165 @@ namespace raft::fs
                 return {};
             }
 
-            tl::expected<void, Error> saveState(std::vector<std::byte> state) noexcept override
+            [[nodiscard]] std::optional<uint64_t> getBaseIndex() override
             {
                 try
                 {
-                    // A transaction ensures that the entire operation succeeds or fails.
-                    // If the application crashes mid-operation, the database will automatically
-                    // roll back, leaving the old state intact.
-                    SQLite::Transaction transaction(*db_);
+                    SQLite::Statement query(*db_,
+                                            "SELECT base_index FROM raft_metadata WHERE id = 1");
+                    if (query.executeStep())
+                    {
+                        return static_cast<uint64_t>(query.getColumn(0).getInt64());
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    spdlog::error("[{}] failed to get base index: {}", path_, e.what());
+                }
+                return std::nullopt;
+            }
 
+            std::optional<data::LogEntry> getEntry(uint64_t index) const override
+            {
+                try
+                {
                     SQLite::Statement query(
-                        *db_, "INSERT OR REPLACE INTO raft_state (id, state) VALUES (1, ?)");
+                        *db_,
+                        "SELECT term, entry_type, entry FROM log_entries WHERE log_index = ?");
+                    query.bind(1, static_cast<int64_t>(index));
 
-                    if (state.empty())
+                    if (query.executeStep())
                     {
-                        query.bind(1, "", 0);
-                    }
-                    else
-                    {
-                        query.bind(1, state.data(), static_cast<int>(state.size()));
-                    }
-                    query.exec();
+                        uint64_t term = static_cast<uint64_t>(query.getColumn(0).getInt64());
+                        int entryType = query.getColumn(1).getInt();
 
-                    transaction.commit();
+                        if (entryType == 1)  // NoOp entry
+                        {
+                            return data::LogEntry {.term = term, .entry = data::NoOp {}};
+                        }
+                        SQLite::Column blobColumn = query.getColumn(2);
+                        const void* data = blobColumn.getBlob();
+                        const int size = blobColumn.getBytes();
+
+                        const auto* begin = static_cast<const std::byte*>(data);
+                        std::vector<std::byte> entryData(begin, begin + size);
+                        return data::LogEntry {.term = term, .entry = std::move(entryData)};
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    spdlog::error(
+                        "[{}] failed to get entry at index {}: {}", path_, index, e.what());
+                }
+                return std::nullopt;
+            }
+
+            [[nodiscard]] std::optional<uint64_t> getLastTerm() const override
+            {
+                try
+                {
+                    SQLite::Statement query(
+                        *db_, "SELECT term FROM log_entries ORDER BY log_index DESC LIMIT 1");
+                    if (query.executeStep())
+                    {
+                        return static_cast<uint64_t>(query.getColumn(0).getInt64());
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    spdlog::error("[{}] failed to get last term: {}", path_, e.what());
+                }
+                return std::nullopt;
+            }
+
+            tl::expected<void, Error> apply(PersistedTransaction const& transaction) override
+            {
+                try
+                {
+                    SQLite::Transaction dbTransaction(*db_);
+
+                    if (transaction.updateTerm && transaction.updateVotedFor)
+                    {
+                        SQLite::Statement updateMetadata(*db_,
+                                                         "UPDATE raft_metadata SET current_term = "
+                                                         "?, voted_for = ? WHERE id = 1");
+                        updateMetadata.bind(1, static_cast<int64_t>(transaction.term));
+                        if (transaction.votedFor.has_value())
+                        {
+                            updateMetadata.bind(2, *transaction.votedFor);
+                        }
+                        else
+                        {
+                            updateMetadata.bind(2);  // NULL
+                        }
+                        updateMetadata.exec();
+                    }
+                    else if (transaction.updateTerm)
+                    {
+                        SQLite::Statement updateTerm(
+                            *db_, "UPDATE raft_metadata SET current_term = ? WHERE id = 1");
+                        updateTerm.bind(1, static_cast<int64_t>(transaction.term));
+                        updateTerm.exec();
+                    }
+                    else if (transaction.updateVotedFor)
+                    {
+                        SQLite::Statement updateVotedFor(
+                            *db_, "UPDATE raft_metadata SET voted_for = ? WHERE id = 1");
+                        if (transaction.votedFor.has_value())
+                        {
+                            updateVotedFor.bind(1, *transaction.votedFor);
+                        }
+                        else
+                        {
+                            updateVotedFor.bind(1);  // NULL
+                        }
+                        updateVotedFor.exec();
+                    }
+
+                    if (transaction.updateLog)
+                    {
+                        // Remove entries from startIndex onward
+                        SQLite::Statement deleteEntries(
+                            *db_, "DELETE FROM log_entries WHERE log_index >= ?");
+                        deleteEntries.bind(1, static_cast<int64_t>(transaction.startIndex));
+                        deleteEntries.exec();
+
+                        // Insert new entries starting from startIndex
+                        uint64_t currentIndex = transaction.startIndex;
+                        for (const auto& entry : transaction.entries)
+                        {
+                            SQLite::Statement insertEntry(
+                                *db_,
+                                "INSERT INTO log_entries (log_index, "
+                                "term, entry_type, entry) VALUES (?, ?, ?, ?)");
+                            insertEntry.bind(1, static_cast<int64_t>(currentIndex));
+                            insertEntry.bind(2, static_cast<int64_t>(entry.term));
+
+                            if (std::holds_alternative<data::NoOp>(entry.entry))
+                            {
+                                insertEntry.bind(3, 1);  // entry_type = 1 for NoOp
+                                insertEntry.bind(4);  // NULL for entry data
+                            }
+                            else
+                            {
+                                const auto& entryData =
+                                    std::get<std::vector<std::byte>>(entry.entry);
+                                insertEntry.bind(3, 0);  // entry_type = 0 for regular entry
+                                insertEntry.bind(
+                                    4, entryData.data(), static_cast<int>(entryData.size()));
+                            }
+                            insertEntry.exec();
+                            currentIndex++;
+                        }
+                    }
+
+                    dbTransaction.commit();
                 }
                 catch (const std::exception& e)
                 {
                     return tl::make_unexpected(errors::PersistenceFailed {.message = e.what()});
                 }
                 return {};
-            }
-
-            tl::expected<std::vector<std::byte>, Error> loadState() noexcept override
-            {
-                try
-                {
-                    SQLite::Statement query(*db_, "SELECT state FROM raft_state WHERE id = 1");
-
-                    if (query.executeStep())  // true if a row was found
-                    {
-                        // Get the blob data from the first column (index 0).
-                        SQLite::Column blobColumn = query.getColumn(0);
-
-                        // Get a pointer to the data and its size.
-                        const void* data = blobColumn.getBlob();
-                        const int size = blobColumn.getBytes();
-
-                        // Create a std::vector<std::byte> from the raw data.
-                        const auto* begin = static_cast<const std::byte*>(data);
-                        return std::vector<std::byte>(begin, begin + size);
-                    }
-                }
-                catch (const std::exception& e)
-                {
-                    return tl::make_unexpected(errors::PersistenceFailed {.message = e.what()});
-                }
-
-                return tl::make_unexpected(errors::NoPersistedState {});
             }
 
           private:
